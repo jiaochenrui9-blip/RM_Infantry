@@ -1,0 +1,18 @@
+# Local IDE and generated build files
+.idea/
+.vscode/
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.elf
+*.map
+*.bin
+*.hex
+*.o
+*.obj
+*.log
+
+# Local historical backups
+Test_Module/Gimbal/Backup/
