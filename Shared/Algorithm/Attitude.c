@@ -205,6 +205,45 @@ uint8_t Attitude_InitializeQuaternion(const Attitude_StartupAverage_t *average)
     return 1u;
 }
 
+uint8_t Attitude_InitFromAcc(const float acc_g[3])
+{
+    float acc_norm;
+    float roll;
+    float pitch;
+    float cos_half_roll;
+    float sin_half_roll;
+    float cos_half_pitch;
+    float sin_half_pitch;
+
+    if (acc_g == NULL)
+    {
+        return 0u;
+    }
+
+    acc_norm = sqrtf(acc_g[0] * acc_g[0] + acc_g[1] * acc_g[1] + acc_g[2] * acc_g[2]);
+    if (acc_norm <= ATTITUDE_ACC_MIN_G || acc_norm >= ATTITUDE_ACC_MAX_G)
+    {
+        return 0u;
+    }
+
+    /* 和 Attitude_InitializeQuaternion 前半段一样，只是 yaw = 0，四元数公式里 yaw 那一项就消掉了 */
+    roll = atan2f(acc_g[1], acc_g[2]);
+    pitch = atan2f(-acc_g[0], sqrtf(acc_g[1] * acc_g[1] + acc_g[2] * acc_g[2]));
+    cos_half_roll = cosf(0.5f * roll);
+    sin_half_roll = sinf(0.5f * roll);
+    cos_half_pitch = cosf(0.5f * pitch);
+    sin_half_pitch = sinf(0.5f * pitch);
+
+    Attitude_Init();
+    ATTITUDE_DATA.q0 = cos_half_roll * cos_half_pitch;
+    ATTITUDE_DATA.q1 = sin_half_roll * cos_half_pitch;
+    ATTITUDE_DATA.q2 = cos_half_roll * sin_half_pitch;
+    ATTITUDE_DATA.q3 = -sin_half_roll * sin_half_pitch;
+    Attitude_UpdateEuler();
+
+    return 1u;
+}
+
 void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float dt_s)
 {
     float q0;

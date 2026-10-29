@@ -366,6 +366,7 @@ uint8_t BMI088_ReadTemperature(float *temp)
     BMI088_DATA.temperature = *temp;
     return BMI088_OK;
 }
+
 static uint8_t BMI088_ProcessRawSample(const int16_t acc_raw[3],
                                        const int16_t gyro_raw[3])
 {
@@ -406,6 +407,13 @@ void BMI088_GetData(BMI088_Data_t *data)
     {
         *data = BMI088_DATA;
     }
+}
+
+void BMI088_SetGyroOffset(float x_dps, float y_dps, float z_dps)
+{
+    BMI088_DATA.gyro_offset[0] = x_dps;
+    BMI088_DATA.gyro_offset[1] = y_dps;
+    BMI088_DATA.gyro_offset[2] = z_dps;
 }
 
 uint8_t BMI088_CalibrateGyro(uint16_t samples)

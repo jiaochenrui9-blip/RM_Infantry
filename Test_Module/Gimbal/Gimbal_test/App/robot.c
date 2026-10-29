@@ -2,11 +2,14 @@
 
 #include "main.h"
 #include "can.h"
+#include "spi.h"
 
 #include "can_bus.h"
 #include "dji_motor_manager.h"
+#include "BMI088.h"
 #include "gimbal.h"
 #include "gimbal_test_cmd.h"
+#include "ins.h"
 
 /* 每路 CAN 只能有一个 manager，这路上的所有电机都注册进来（见根目录 notes.md 第 2 节）。 */
 static DJI_MotorManager_t robot_can1;
@@ -28,6 +31,10 @@ void Robot_Init(void)
         Error_Handler();
     }
 
+    /* IMU：这里只初始化 BMI088（约 85 ms），零偏和初始姿态在上电后约 1 s 内标定，期间整车别动。
+       失败只影响 IMU 模式，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
+    (void)INS_Init(&hspi1);
+
     if ((DJI_MotorManager_Start(&robot_can1) != HAL_OK) ||
         (DJI_MotorManager_Start(&robot_can2) != HAL_OK))
     {
@@ -48,6 +55,9 @@ void Robot_Loop(void)
         return;
     }
     robot_last_tick = now;
+
+    /* 0. 传感器：IMU 采样和姿态解算。结果现在只在调试器里看 ins_feedback，v2 第 2 步再喂给云台 */
+    INS_Update(now);
 
     /* 1. 指令：测试工程用调试变量；合并后换成 robot_cmd */
     Gimbal_GetFeedback(&feedback);
@@ -82,4 +92,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     {
         DJI_MotorManager_ProcessRxFrame(&robot_can2, &header, data);
     }
+}
+
+/* HAL 的 SPI 回调：BMI088 的 DMA 读取靠它往下走（读完加速度计接着读陀螺仪，读完才置 ready），不转就永远没有样本。 */
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    BMI088_SPI_TxRxCpltCallback(hspi);
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+    BMI088_SPI_ErrorCallback(hspi);
 }

@@ -79,6 +79,7 @@ uint8_t BMI088_ReadID(uint8_t *acc_id, uint8_t *gyro_id);
 uint8_t BMI088_ReadTemperature(float *temp);
 void BMI088_GetData(BMI088_Data_t *data);
 uint8_t BMI088_CalibrateGyro(uint16_t samples);
+void BMI088_SetGyroOffset(float x_dps, float y_dps, float z_dps);
 
 HAL_StatusTypeDef BMI088_StartSample(void);
 uint8_t BMI088_IsSampleReady(void);

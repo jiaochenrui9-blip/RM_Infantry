@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # 本工程的应用层：装配层 + 各模块
     App/robot.c
     App/gimbal/gimbal.c
+    App/ins/ins.c
     App/test_cmd/gimbal_test_cmd.c
 
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
@@ -73,6 +74,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
     App/gimbal
+    App/ins
     App/test_cmd
 
     ${SHARED_DIR}/Devices/DJI_Driver

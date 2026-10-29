@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-10-27（云台对话：Gimbal_test 的 App 重写为精简版 v1）
+> 最后更新：2026-10-29（云台对话：定 v2 接口；ins 改好并接入 robot.c；Attitude 加 InitFromAcc）
 
 ## 1. 项目组织
 
@@ -31,7 +31,7 @@ RM_Infantry/
 规则：
 
 1. 下层不 include 上层；App 模块之间也互不 include，只由 robot.c（合并后加 robot_cmd）连接。
-2. 每个 App 模块对外只有 `Xxx_Init()`、`Xxx_SetCmd(const XxxCmd_t *)`、`Xxx_Update(uint32_t now_tick)`、`Xxx_GetFeedback(XxxFeedback_t *)`，以及定义在 `xxx.h` 里的 Cmd / Feedback 结构体。命令从哪来（调试变量、遥控、视觉、另一块板经 CAN 转来）模块不关心，所以单板、双板方案都能接。
+2. 每个 App 模块对外只有 `Xxx_Init()`、`Xxx_SetCmd(const XxxCmd_t *)`、`Xxx_Update(uint32_t now_tick)`、`Xxx_GetFeedback(XxxFeedback_t *)`，以及定义在 `xxx.h` 里的 Cmd / Feedback 结构体。命令从哪来（调试变量、遥控、视觉、另一块板经 CAN 转来）模块不关心，所以单板、双板方案都能接。要用别的模块的数据时（如云台 IMU 模式要 ins 的姿态），再加一个 `Xxx_SetYyy(const XxxYyy_t *)`，结构体定义在本模块头文件里，由 robot.c 每周期拷过来喂进去；没有指令的模块（如 ins）不要 SetCmd。
 3. 一路 CAN 只建一个 `DJI_MotorManager_t`，由 robot.c 持有，`Xxx_Init()` 时传给模块，模块把自己的电机注册进去；每个控制周期由 robot.c 对每路 CAN 调一次 `DJI_MotorManager_SendAll()`。原因：manager 负责检查同一路上的 ID / 槽位冲突；SendAll 会把同一控制帧里未注册的槽位发 0，两个 manager 发同一个帧 ID 会互相清零。
 4. 模块与调度方式无关：`Xxx_Update()` 固定周期调用，dt 用宏写死。测试工程用裸机 1 kHz 循环；合并工程放进 FreeRTOS 任务，模块代码不改。
 5. CubeMX 生成的 main.c 只加两处调用：外设初始化后 `Robot_Init()`，`while(1)` 里一直调 `Robot_Loop()`（内部按 HAL_GetTick 每 1 ms 跑一次）；HAL 回调（如 CAN 接收）放 robot.c。参考实现见 Gimbal_test/App/robot.c。
@@ -45,7 +45,8 @@ RM_Infantry/
 - 云台：yaw 俯视逆时针为正，pitch 抬头为正。
 - 底盘（建议）：x 向前、y 向左、wz 俯视逆时针为正（和云台 yaw 同向）。
 - 电机装反时用 `motor_direction = -1` 修正，让逻辑正方向符合上面的约定。
-- 云台 Feedback 提供 `yaw_rel_deg`（云台相对底盘正前方的角度），底盘跟随云台、运动坐标变换都用它。
+- 云台 Feedback 提供 `yaw_rel_deg`（云台相对底盘正前方的角度），底盘跟随云台、运动坐标变换都用它（v1 代码里还叫 `yaw_deg`，v2 改名）。
+- ins（惯导）输出也按这套：云台头坐标系 x 朝枪口、y 朝左、z 朝上；yaw 俯视逆时针为正、pitch 抬头为正。没有磁力计时 yaw 以上电朝向为 0，会漂。
 
 ## 4. CAN 分配（合并前整体检查）
 
@@ -84,7 +85,7 @@ RM_Infantry/
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
-| 云台 | Test_Module/Gimbal/Gimbal_test | CAN1 已改 PD0/PD1；App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，488 行），编译无警告、主机闭环测试通过；未上板，参数待标定。带 IMU 的完整版备份在 Test_Module/Gimbal/Backup |
+| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，ARM 编译无警告、主机测试通过，未上板；第 2 步 IMU 模式待写，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup |
 | 底盘 | Test_Module/Chassis | 未开始；按第 2、3 节约定写，公共代码按第 7 节引用 Shared |
 
 ## 7. Shared 的用法与改动记录
@@ -107,3 +108,5 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-10-27 | Gimbal_test 用 CubeMX 配置 BMI088 SPI1、片选、DMA 和数据就绪输入，并生成代码 | 清理编译通过；BMI088 初始化、采样回调及 Mahony 尚未接入，未做板上验证 |
 | 2026-10-27 | 按用户要求改为移植 C:\Clion\IMU\Core\Algorithm 的原版 Attitude，并补入依赖的 IST8310；DRDY 改由主循环发起读取 | Attitude 原文件哈希一致，目标单文件编译及主机测试通过；完整构建受 Gimbal_Update 声明不一致阻塞；I2C3 尚未配置，未做硬件验证 |
 | 2026-10-27 | 新增 `Shared/Algorithm/user_math.c/.h`（`Math_Clamp`、`Math_WrapDeg180`）；其余 Shared 文件未改 | Gimbal_test 完整清理编译无警告（IST8310 未被调用，链接时被裁掉）；主机测试含回绕边界用例，通过 |
+| 2026-10-29 | BMI088 加 `BMI088_SetGyroOffset()`（用户写）：ins 用 DMA 样本自己求零偏后写回驱动，代替阻塞的 `BMI088_CalibrateGyro` | Gimbal_test 清理编译无警告；主机测试零偏估计准确；未上板 |
+| 2026-10-29 | Attitude 加 `Attitude_InitFromAcc()`：没有磁力计时用静止时的加速度平均值初始化 roll / pitch（yaw = 0），算法和 `Attitude_InitializeQuaternion` 前半段相同；原有函数未改 | Gimbal_test 清理编译无警告；主机测试（真 Attitude.c）初始化后 pitch 与真值一致；未上板 |
