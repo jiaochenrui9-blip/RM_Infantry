@@ -30,6 +30,9 @@
 #define GIMBAL_SPEED_LIMIT_DPS         200.0f
 /* 目标斜坡：每毫秒最多变化多少度，0.1 即 100°/s。看阶跃响应时可以临时调大。 */
 #define GIMBAL_RAMP_DEG_PER_MS         0.1f
+/* 速度前馈系数：斜坡速度乘它加到速度环目标上（再按 GIMBAL_SPEED_LIMIT_DPS 限幅）。
+   1 为完整前馈，0 为关闭；对比有无前馈时改这里。 */
+#define GIMBAL_SPEED_FF_RATIO          1.0f
 /* pitch 重力前馈：pitch 水平时抵消重力需要的电流，按 cos(pitch) 缩放。先给 0。 */
 #define GIMBAL_PITCH_GRAVITY_FF        0.0f
 

@@ -1,12 +1,12 @@
 # Gimbal_test 笔记（云台测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；驱动移植细节和验证记录见本目录 `README.md`；BMI088 / Attitude 的接入说明见 `Shared/Devices/BMI088/README.md`。
-> 最后更新：2026-10-27
+> 最后更新：2026-10-29（加速度前馈）
 
 ## 当前状态
 
 - .ioc：CAN1 已改到 PD0/PD1；SPI1 + DMA、BMI088 片选和数据就绪输入已配置。IST8310 的 I2C3、IMU 加热的 TIM10 还没配。
-- App 是精简版的 v1（只有编码器定角度），共 488 行：编译无警告，主机闭环模型测试通过（见 README）。**还没上板**：方向、中值、限位、PID 都是占位值。
+- App 是精简版的 v1（只有编码器定角度），共 499 行：主机闭环模型测试通过（见 README）。2026-10-29 加了速度前馈，只做过主机编译和模型仿真，ARM 工程未重新编译。**还没上板**：方向、中值、限位、PID 都是占位值。
 - 之前带 IMU 模式的完整版（935 行）备份在 `Test_Module/Gimbal/Backup/App_full_2026-10-27`，不参与编译，v2 写 IMU 时参考。用户觉得变量太多、太乱，所以重写成现在这版；反思写进了全局 CLAUDE.md。
 
 ## 已知问题 / 坑
@@ -28,7 +28,7 @@ Gimbal_test/App/
 ├── robot.c / robot.h            装配层：robot_can1/2、初始化顺序、1 ms 调度、CAN 接收回调
 ├── gimbal/
 │   ├── gimbal.c / gimbal.h      云台模块（合并时整个文件夹搬走）
-│   └── gimbal_config.h          ID、方向、中值、限位、限幅、斜坡、重力前馈、PID
+│   └── gimbal_config.h          ID、方向、中值、限位、限幅、斜坡、速度前馈、重力前馈、PID
 └── test_cmd/
     └── gimbal_test_cmd.c / .h   调试器指令源（合并后由 robot_cmd 取代）
 Shared/Algorithm/user_math.*     Math_Clamp、Math_WrapDeg180
@@ -38,14 +38,14 @@ Shared/Algorithm/user_math.*     Math_Clamp、Math_WrapDeg180
 
 gimbal.h 对外：`GimbalMode_e`（RELAX / ENCODER）、`GimbalCmd_t`（模式 + 两个目标角）、`GimbalFeedback_t`（模式 + 两个当前角），以及 Init / SetCmd / Update / GetFeedback 四个函数。
 
-gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值、上下限位、角度环和速度环 PID、当前角、角速度、斜坡后的目标。方向存在 `motor.motor_direction`，环的输出就看 `angle_pid.out` / `speed_pid.out`，不另存。
+gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值、上下限位、角度环和速度环 PID、当前角、角速度、斜坡后的目标。方向存在 `motor.motor_direction`，环的输出就看 `angle_pid.out` / `speed_pid.out`，不另存。速度环目标 = 角度环输出 + 速度前馈（斜坡每毫秒走的角度换算成 dps），再限幅到 `GIMBAL_SPEED_LIMIT_DPS`，看 `speed_pid.target`。
 
 ## 怎么用（CLion 调试器）
 
 | 变量 | 内容 |
 |---|---|
 | `gimbal_test` | 指令：`mode`（0 无力 / 1 闭环）、`yaw_deg`、`pitch_deg`；方波：`yaw_square_deg`、`pitch_square_deg`（幅值，0 为不加）、`square_period_ms` |
-| `gimbal_yaw`、`gimbal_pitch` | 每个轴：`angle_deg`、`rate_dps`、`target_deg`、`angle_pid.out`（目标角速度）、`speed_pid.out`（电流）、`motor.encoder`（原始编码器） |
+| `gimbal_yaw`、`gimbal_pitch` | 每个轴：`angle_deg`、`rate_dps`、`target_deg`、`speed_pid.target`（目标角速度，含前馈）、`angle_pid.out`（其中角度环的部分）、`speed_pid.out`（电流）、`motor.encoder`（原始编码器） |
 | `gimbal_mode`、`gimbal_fault` | 实际模式、是否被掉线锁定 |
 
 流程：上电 → RELAX 下手转标定中值和方向 → `gimbal_test.mode` 改成 1 → 再改 `yaw_deg` / `pitch_deg`。改 mode 时目标会自动同步成当前角，所以要先切模式、再改目标。
@@ -62,8 +62,8 @@ gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值
 1. 看反馈：上电默认 RELAX，只发 0 电流。手转时 `gimbal_yaw.motor.encoder` 跟着变。
 2. 标定：扶到正前方 / 水平，记下 `motor.encoder` 填进 `GIMBAL_*_ECD_OFFSET`；pitch 推到上下极限记 `angle_deg`，填软限位（留几度余量）；按约定正方向手转，`angle_deg` 和 `rate_dps` 都应变大，否则方向改 -1。
 3. 首次闭环：电流限幅保持小值，`mode` 改 1，把目标改动 5° 左右，云台应往目标方向走。
-4. 速度环：看 `angle_pid.out`（目标角速度）和 `rate_dps` 的跟随，先调 P 再加 I（pitch 有重力，P 不够时会下垂，靠 I 或 `GIMBAL_PITCH_GRAVITY_FF`）。
-5. 角度环：手推看回位；把 `yaw_square_deg` 设成 10 左右用方波看超调和调节时间（斜坡会把阶跃变缓，看阶跃时可临时把 `GIMBAL_RAMP_DEG_PER_MS` 调大）。
+4. 速度环：看 `speed_pid.target`（目标角速度）和 `rate_dps` 的跟随，先调 P 再加 I（pitch 有重力，P 不够时会下垂，靠 I 或 `GIMBAL_PITCH_GRAVITY_FF`）。
+5. 角度环：手推看回位；把 `yaw_square_deg` 设成 10 左右用方波看超调和调节时间（斜坡会把阶跃变缓，看阶跃时可临时把 `GIMBAL_RAMP_DEG_PER_MS` 调大）。斜坡运动中 `target_deg - angle_deg` 应接近 0；把 `GIMBAL_SPEED_FF_RATIO` 改成 0 可对比无前馈时的落后量（约为斜坡速度 / 角度环 Kp）。前馈在斜坡停下时会突然归零，若停止时有超调，可把系数调到 1 以下或提高速度环带宽。
 6. 保护：拔掉一个电机的 CAN 线，整个云台应无力，`gimbal_fault` 变 1。
 
 验收：两轴稳在设定角，手推回位不振荡，阶跃无明显超调，掉线自动无力。电流限幅调好再放开。

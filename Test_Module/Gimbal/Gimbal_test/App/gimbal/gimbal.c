@@ -21,8 +21,8 @@ typedef struct
     uint16_t ecd_offset;        /* 中值 */
     float min_deg;              /* 软限位 */
     float max_deg;
-    PID_t angle_pid;            /* 角度环：deg → 目标角速度，输出就是 angle_pid.out */
-    PID_t speed_pid;            /* 速度环：dps → 电流，输出就是 speed_pid.out */
+    PID_t angle_pid;            /* 角度环：deg → 角速度，输出 angle_pid.out，加上前馈才是目标角速度 */
+    PID_t speed_pid;            /* 速度环：目标角速度看 speed_pid.target，输出电流 speed_pid.out */
     float angle_deg;            /* 编码器角，相对中值 */
     float rate_dps;             /* 角速度 */
     float target_deg;           /* 经过限位和斜坡的目标 */
@@ -97,12 +97,14 @@ static void Gimbal_AxisRead(GimbalAxis_t *axis)
     axis->rate_dps = (float)feedback.speed_rpm * GIMBAL_DPS_PER_RPM;
 }
 
-/* 一个轴的控制：目标限位 → 斜坡 → 串级 PID，返回电流。 */
+/* 一个轴的控制：目标限位 → 斜坡 → 串级 PID（带速度前馈），返回电流。 */
 static float Gimbal_AxisControl(GimbalAxis_t *axis, float cmd_deg)
 {
     float goal = Math_Clamp(Math_WrapDeg180(cmd_deg), axis->min_deg, axis->max_deg);
     float diff = goal - axis->target_deg;
     float error;
+    float ff_dps;
+    float speed_target_dps;
 
     /* 不限位的轴按最短方向走；有限位的轴不能跨过 ±180° 绕到背面去 */
     if ((axis->max_deg - axis->min_deg) >= 360.0f)
@@ -112,10 +114,16 @@ static float Gimbal_AxisControl(GimbalAxis_t *axis, float cmd_deg)
     diff = Math_Clamp(diff, -GIMBAL_RAMP_DEG_PER_MS, GIMBAL_RAMP_DEG_PER_MS);
     axis->target_deg = Math_WrapDeg180(axis->target_deg + diff);
 
+    /* 速度前馈：目标这 1 ms 走了 diff 度，换算成角速度直接给速度环。
+       没有它，角度环只能靠误差产生这个速度，斜坡时会一直落后“斜坡速度 / 角度环 Kp”度。 */
+    ff_dps = GIMBAL_SPEED_FF_RATIO * diff / GIMBAL_DT_S;
+
     /* 误差先折到 ±180°，再把 PID 目标写成“反馈 + 误差”，跨 ±180° 时误差不会算成 350° */
     error = Math_WrapDeg180(axis->target_deg - axis->angle_deg);
     PID_SetTarget(&axis->angle_pid, axis->angle_deg + error);
-    PID_SetTarget(&axis->speed_pid, PID_Calculate(&axis->angle_pid, axis->angle_deg, GIMBAL_DT_S));
+    speed_target_dps = Math_Clamp(PID_Calculate(&axis->angle_pid, axis->angle_deg, GIMBAL_DT_S) + ff_dps,
+                                  -GIMBAL_SPEED_LIMIT_DPS, GIMBAL_SPEED_LIMIT_DPS);
+    PID_SetTarget(&axis->speed_pid, speed_target_dps);
     return PID_Calculate(&axis->speed_pid, axis->rate_dps, GIMBAL_DT_S);
 }
 
