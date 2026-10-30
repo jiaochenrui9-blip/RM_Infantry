@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-10-29（云台对话：定 v2 接口；ins 改好并接入 robot.c；Attitude 加 InitFromAcc）
+> 最后更新：2026-10-30（云台对话：首次上板，只接调试器 3.3 V）
 
 ## 1. 项目组织
 
@@ -79,13 +79,14 @@ RM_Infantry/
 | 晶振 | HSE 12 MHz | |
 
 - 原理图上两路 CAN 收发器（TJA1044）后面都有 120 Ω 电阻，应是板载终端电阻 → 总线另一端（最远的电机）打开终端电阻即可。
+- CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复。
 - GM6020：拨码 1~3 位设 ID（1~7），第 4 位是 CAN 终端电阻。反馈 1 kHz，编码器 0~8191，转速单位 rpm。电流控制 ±16384 对应 ±3 A，需要固件 ≥1.0.11.2，并在 RoboMaster Assistant（≥2.7）里打开电流环。
 
 ## 6. 各模块进度
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
-| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，ARM 编译无警告、主机测试通过，未上板；第 2 步 IMU 模式待写，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup |
+| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步 IMU 模式待写，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup |
 | 底盘 | Test_Module/Chassis | 未开始；按第 2、3 节约定写，公共代码按第 7 节引用 Shared |
 
 ## 7. Shared 的用法与改动记录
