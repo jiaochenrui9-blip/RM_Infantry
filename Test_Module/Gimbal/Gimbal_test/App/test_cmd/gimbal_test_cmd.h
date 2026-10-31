@@ -9,15 +9,15 @@
  */
 typedef struct
 {
-    GimbalMode_e mode;          /* 0 无力 / 1 编码器闭环 */
-    float yaw_deg;              /* 目标角 */
+    GimbalMode_e mode;          /* 0 无力 / 1 编码器闭环 / 2 IMU 闭环 */
+    float yaw_deg;              /* 目标角：模式 1 相对底盘，模式 2 相对地面 */
     float pitch_deg;
     float yaw_square_deg;       /* 方波幅值：非 0 时目标在“目标角”和“目标角 + 幅值”之间来回切，看阶跃响应用 */
     float pitch_square_deg;
     uint32_t square_period_ms;
 } GimbalTest_t;
 
-/* 改 mode 时目标会自动同步成当前角，所以先切模式、再改目标。 */
+/* 改 mode 时目标会自动同步成新模式下的当前角，所以先切模式、再改目标。 */
 extern volatile GimbalTest_t gimbal_test;
 
 void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback, GimbalCmd_t *cmd);

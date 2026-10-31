@@ -18,7 +18,9 @@
 #define GIMBAL_YAW_ECD_OFFSET          0U
 #define GIMBAL_PITCH_ECD_OFFSET        0U
 
-/* 软限位（度），在机械极限基础上往里留几度。yaw 能 360° 转时写 -180 / 180 就是不限位。待标定 */
+/* 软限位（度，编码器角，编码器 / IMU 两个模式都按它限），在机械极限基础上往里留几度。
+   yaw 能 360° 转时写 -180 / 180 就是不限位。IMU 模式下底盘带着云台顶在限位上转时，
+   云台会超出软限位约“底盘角速度 / 角度环 Kp”度（Kp 8、30°/s 时约 4°），余量按这个留。待标定 */
 #define GIMBAL_YAW_MIN_DEG             (-90.0f)
 #define GIMBAL_YAW_MAX_DEG             (90.0f)
 #define GIMBAL_PITCH_MIN_DEG           (-15.0f)

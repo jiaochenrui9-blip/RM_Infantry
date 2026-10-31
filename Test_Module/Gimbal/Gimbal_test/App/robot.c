@@ -47,6 +47,7 @@ void Robot_Init(void)
 void Robot_Loop(void)
 {
     uint32_t now = HAL_GetTick();
+    InsFeedback_t imu;
     GimbalFeedback_t feedback;
     GimbalCmd_t cmd;
 
@@ -56,8 +57,10 @@ void Robot_Loop(void)
     }
     robot_last_tick = now;
 
-    /* 0. 传感器：IMU 采样和姿态解算。结果现在只在调试器里看 ins_feedback，v2 第 2 步再喂给云台 */
+    /* 0. 传感器：IMU 采样和姿态解算，结果交给要用它的模块（现在只有云台的 IMU 模式） */
     INS_Update(now);
+    INS_GetFeedback(&imu);
+    Gimbal_SetImu(&imu);
 
     /* 1. 指令：测试工程用调试变量；合并后换成 robot_cmd */
     Gimbal_GetFeedback(&feedback);

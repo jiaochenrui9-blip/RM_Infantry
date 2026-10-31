@@ -9,11 +9,19 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback, G
     GimbalMode_e mode = gimbal_test.mode;
     uint8_t square_high = 0U;
 
-    /* 刚切模式：目标同步成当前角，免得一进闭环云台就转去旧目标 */
+    /* 刚切模式：目标同步成新模式下的当前角，免得一进闭环云台就转去旧目标 */
     if (mode != gimbal_test_last_mode)
     {
-        gimbal_test.yaw_deg = feedback->yaw_deg;
-        gimbal_test.pitch_deg = feedback->pitch_deg;
+        if (mode == GIMBAL_MODE_IMU)
+        {
+            gimbal_test.yaw_deg = feedback->yaw_imu_deg;
+            gimbal_test.pitch_deg = feedback->pitch_imu_deg;
+        }
+        else
+        {
+            gimbal_test.yaw_deg = feedback->yaw_rel_deg;
+            gimbal_test.pitch_deg = feedback->pitch_rel_deg;
+        }
         gimbal_test_last_mode = mode;
     }
 
