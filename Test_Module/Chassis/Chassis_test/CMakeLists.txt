@@ -32,7 +32,9 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 enable_language(C ASM)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME}
+    App/Infantry_Chassis.c
+    App/Infantry.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -50,8 +52,9 @@ endif()
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # 本工程的应用层：装配层 + 各模块（底盘模块写好后加在这里）
+    # 本工程的应用层：装配层 + 板间通信（底盘模块的文件在上面 add_executable 里）
     App/robot.c
+    App/chassis_link.c
 
     # 底盘 v1 用到的公共代码：M3508 驱动、PID、限幅
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c

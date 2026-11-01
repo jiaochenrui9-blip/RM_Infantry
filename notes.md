@@ -58,7 +58,7 @@ RM_Infantry/
 | CAN1（代码默认，待按接线确认） | GM6020 yaw | 1 | 0x205 | 0x1FE / 0 | 云台工程已用 |
 | CAN1（代码默认，待按接线确认） | GM6020 pitch | 2 | 0x206 | 0x1FE / 1 | 云台工程已用 |
 | CAN2（代码默认，待按接线确认） | M3508 ×4（底盘） | 1~4 | 0x201~0x204 | 0x200 / 0~3 | 底盘工程第 1 步要用（还没写） |
-| 两块板之间那路（底盘板默认 CAN1） | 板间指令：云台板 → 底盘板 | — | — | 0x110，DLC 8，1 kHz | 接口已定（Chassis_test notes），双板时第 3 步写 |
+| 两块板之间那路（底盘板默认 CAN1） | 板间指令：云台板 → 底盘板 | — | — | 0x110，DLC 8，1 kHz | 底盘板接收已写（Chassis_test 的 chassis_link，2026-11-01）；云台板发送待写 |
 
 - 同一路总线上：GM6020 ID 1~4 的反馈 0x205~0x208 和 M3508/M2006 ID 5~8 的反馈相同，不能同时用。
 - GM6020 电压控制帧 0x1FF 与 M3508/M2006 ID 5~8 的控制帧相同；现有驱动用电流控制 0x1FE/0x2FE，不冲突。
@@ -94,7 +94,7 @@ RM_Infantry/
 | 模块 | 工程 | 状态 |
 |---|---|---|
 | 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup |
-| 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。用户自己写第一版，还没开始。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`） |
+| 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。2026-11-01 用户开始写（Infantry.h / Infantry_Chassis.c，速度环用电机层自带的），按用户要求 Claude 写好了初始化、板间指令接收（chassis_link）和 `Chassis_Update`（四种模式、掉线锁定、斜坡、坐标变换、逆运动学；轮型只体现在两个参数上），ARM 编译无警告、主机模型测试通过，没上板。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`） |
 
 ## 7. Shared 的用法与改动记录
 

@@ -1,7 +1,7 @@
 # Chassis_test 笔记（底盘测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；云台那边踩过的坑见 `Test_Module/Gimbal/Gimbal_test/notes.md` 的「已知问题」，大部分底盘也适用。
-> 最后更新：2026-11-01（建工程；按步兵逻辑定接口：底盘接收云台主控的指令，四种模式，板间 CAN 帧）
+> 最后更新：2026-11-01（建工程；按步兵逻辑定接口；按用户要求写了初始化、板间指令接收和 Chassis_Update：ARM 编译无警告，主机测试 59 + 53 项通过，没上板）
 
 ## 当前状态
 
@@ -10,7 +10,9 @@
 - 用户手上还没有电机。写完先做主机模型测试（和云台一样），电机到了再上板。
 - 轮型未定（2026-11-01 问过，用户没选）。接口和轮型无关，麦轮、全向轮的逆运动学都写在「接口」里，定了再写对应那组。
 - 参考：用户自己的果园机器人底盘（全向轮，已上板调通），见「参考：果园机器人底盘」。
-- 下一步：用户按「接口」第 1 步自己写第一版，写完 Claude 审查 + 主机模型测试。
+- 2026-11-01 用户开始写（`App/Infantry.h`、`App/Infantry_Chassis.c`，速度环用电机层自带的、轮子顺时针编号），并让 Claude 写好初始化和接收指令：`Infantry_Chassis_Init`、`Chassis_SetCmd`、`chassis_config.h`、`chassis_link`（板间帧接收），robot.c 接好。ARM 清理编译无警告（FLASH 13764 B、RAM 2544 B），主机测试通过（见「初始化和接收的验证」），没上板。
+- 2026-11-01 用户写了 `Chassis_Update` 的开头（先切模式、最后统一 `MotorControl_Update`），说后面不太会，让 Claude 写完：四种模式、掉线锁定、斜坡、坐标变换、逆运动学（轮型只体现在两个参数上）、超转速等比例缩小；robot.c 每周期调用。ARM 清理编译无警告（FLASH 20876 B、RAM 2952 B）；主机模型测试 53 项通过（见「Chassis_Update 的验证」），没上板。
+- 第 1、2 步的代码都有了（第 3 步只差云台板的发送）。下一步：电机到了按「上板步骤」标方向、调速度环；轮型定了改 `CHASSIS_XY_FACTOR`、`CHASSIS_ROTATE_RADIUS_M`。
 
 ## 工程是怎么建的（以后改外设照这个做）
 
@@ -49,21 +51,23 @@
 - 轮速超过 `RPM_MAX`（8000 转子 rpm）时 4 个轮等比例缩小，合成方向不变（在 Omni_Remote.c / Mecanum_Remote.c 里）。
 - 坐标系和这边不同：那边 vx 向右、vy 向前、wz 顺时针为正，指令是 −1~1 的归一化值；RM 约定 x 前、y 左、wz 俯视逆时针为正，单位 m/s、度/秒。借公式时换算：vx_RM = vy_果园，vy_RM = −vx_果园，wz_RM = −wz_果园。换完后它的麦轮公式（“从上往下看辊子连成 X 形”的装法）和下面的麦轮公式一致；全向轮公式也一致，只是每个轮子正方向的定义不同（2026-11-01 用 10 万组随机输入对过）。
 - 由此推出的电机方向：那边电机都是轴朝外装、方向全是 1、正 = 推车体顺时针，说明 C620 正电流时输出轴从轴端看逆时针转（和 C620 手册 PWM 模式的默认正方向一致）。放到这边“正 = 往前滚”的约定下：左侧两个轮正转往前、右侧两个往后，也就是左侧方向 1、右侧 −1。这是推出来的，上板照「上板步骤」第 1 步第 3 条核对。
-- 要借这个底盘测第 1、2 步：底盘在 CAN1，robot.c 里改传 `&robot_can1`；ID 不用重设，config 里填左前 4、左后 3、右后 2、右前 1；用全向轮公式，R 和轮子半径按那台车量。
+- 要借这个底盘测第 1、2 步：底盘在 CAN1，robot.c 里 `Infantry_Chassis_Init` 改传 `&robot_can1`；ID 不用重设，config 里填前左 4、前右 1、后右 2、后左 3；用全向轮公式，R 和轮子半径按那台车量。
 
 ## 版本规划（按步兵逻辑，分 3 步，每步单独验收）
 
 1. **第 1 步：不跟随模式**——坐标变换、逆运动学（含超转速等比例缩小）、4 个速度环、RELAX 和掉线锁定。底盘单独就能测，云台角在调试器里手填。
 2. **第 2 步：跟随云台、小陀螺 + 加速度斜坡**。符号底盘单独能测（云台角填固定值）；真正的跟随效果要云台在 IMU 模式、第 3 步通了以后看。
-3. **第 3 步：板间通信 chassis_link**。两块板都在时做。单板方案不要这一步，robot_cmd 直接填 `ChassisCmd_t`。
+3. **第 3 步：板间通信 chassis_link**。底盘板的接收 2026-11-01 已写（用户要求提前做）；云台板的发送和两板联调等两块板都在时做。单板方案不要这一步，robot_cmd 直接填 `ChassisCmd_t`。
 - **以后**：功率控制（裁判系统给功率上限和缓冲能量，在速度环和输出之间按比例缩小 4 个电流）、超级电容、小陀螺时平移方向的延迟补偿、变速小陀螺、底盘→云台的回传帧（裁判系统接在底盘板时，把热量 / 弹速上限传给云台板）。
 
-## 接口（2026-11-01 定，按步兵逻辑；用户自己写第一版）
+## 接口（2026-11-01 定，按步兵逻辑；初始化、接收、Chassis_Update 都已写）
+
+文件（用户定的名字）：`App/Infantry.h`（类型 + 底盘的函数）、`App/Infantry_Chassis.c`（底盘模块）、`App/chassis_config.h`（参数）、`App/chassis_link.c/.h`（板间指令接收）。
 
 数据流：云台板（键鼠 / 遥控 → robot_cmd；云台角来自 `Gimbal_GetFeedback` 的 `yaw_rel_deg`）→ 板间 CAN 0x110 → 底盘板 `ChassisLink_GetCmd` → robot.c → `Chassis_SetCmd` → `Chassis_Update` → 4 个 M3508。
 
 ```c
-/* chassis.h */
+/* Infantry.h（模式和指令结构体是用户写的，和这里一样） */
 #include "dji_motor_manager.h"
 
 typedef enum
@@ -82,10 +86,12 @@ typedef struct
     float gimbal_yaw_rel_deg;   /* 云台相对底盘正前方的角度（云台的 yaw_rel_deg），俯视逆时针为正，-180~180 */
 } ChassisCmd_t;
 
-/* 把 4 个 M3508 注册到这路 CAN 的 manager，必须在 DJI_MotorManager_Start() 之前调用。 */
-HAL_StatusTypeDef Chassis_Init(DJI_MotorManager_t *bus);
+/* 已写：把 4 个 M3508 注册到这路 CAN 的 manager，必须在 DJI_MotorManager_Start() 之前调用；注册失败返回 HAL_ERROR。 */
+HAL_StatusTypeDef Infantry_Chassis_Init(DJI_MotorManager_t *manager);
+/* 已写：每 1 ms 在 Chassis_Update 之前调，非法模式当 RELAX。 */
 void Chassis_SetCmd(const ChassisCmd_t *cmd);
-/* 每 1 ms 调一次：定模式 → 算 wz → 斜坡 → 坐标变换 → 逆运动学 → 4 个速度环 → 设置电流。发 CAN 帧由 robot.c 统一做。 */
+/* 已写：每 1 ms 调一次：定模式 → 算 wz → 斜坡 → 坐标变换 → 逆运动学 → 4 个电机的目标转速 → MotorControl_Update。
+   发 CAN 帧由 robot.c 统一做。运动模式下任一电机掉线（100 ms）→ 无力并锁住，指令给一次 RELAX 才解除。 */
 void Chassis_Update(uint32_t now_tick);
 ```
 
@@ -103,21 +109,19 @@ void Chassis_Update(uint32_t now_tick);
 
 `Chassis_Update` 的计算顺序：
 
-1. 定模式：指令 RELAX → 清 fault；指令是运动模式但有一个轮子掉线（`DJI_Motor_IsOnline`，100 ms）→ fault = 1；fault 时强制 RELAX，要给一次 RELAX 才解除。从 RELAX 进运动模式时清 4 个速度环和跟随环，斜坡从 0 开始；运动模式之间切换不清速度环，斜坡接着走；切进 FOLLOW 时清跟随环。
-2. 按模式算目标 wz（上表）。跟随环用 PID.c：目标 0、反馈 −gimbal_yaw_rel（底盘相对云台的角度），输出就是 wz，输出限幅就是 `CHASSIS_FOLLOW_MAX_DPS`。
+1. 定模式：指令 RELAX → 清 fault；指令是运动模式但有一个轮子掉线（`DJI_Motor_IsOnline`，100 ms）→ fault = 1；fault 时强制 RELAX，要给一次 RELAX 才解除。从 RELAX 进运动模式时电机层切到速度模式（`MotorControl_SetMode` 会清速度环），斜坡从 0 开始；运动模式之间切换电机层一直是速度模式、不清速度环，斜坡接着走；切进 FOLLOW 时清跟随环。
+2. 按模式算目标 wz（上表）。跟随只用 P：wz = `Math_Clamp(CHASSIS_FOLLOW_KP × gimbal_yaw_rel, ±CHASSIS_FOLLOW_MAX_DPS)`，不用 PID_t。原因：微分在云台角过 ±180° 时会冲一下；不需要积分（轮子的速度环有积分，云台不动时 P 就能收敛到 0）。
 3. 斜坡（第 2 步加）：(vx, vy) 在**云台坐标系**里往指令走一步，按向量长度每毫秒最多变 `CHASSIS_ACCEL_MPS2` × 0.001，方向不变；wz 每毫秒最多变 `CHASSIS_WZ_ACCEL_DPS2` × 0.001。
 4. 坐标变换（θ = gimbal_yaw_rel，换成 rad）：vx_底 = vx·cosθ − vy·sinθ，vy_底 = vx·sinθ + vy·cosθ。
-5. 逆运动学（公式见下）→ 4 个目标转子转速；任一个超过 `CHASSIS_WHEEL_MAX_RPM` 时 4 个一起等比例缩小（合成方向不变）。
-6. 4 个速度环 → 电流 → `Math_Clamp` 到 ±电流限幅 → `DJI_Motor_SetCurrent` → `MotorControl_Update`（电机层的掉线保护，同云台的 `Gimbal_AxisOutput`）。以后功率控制插在速度环和 SetCurrent 之间。
+5. 逆运动学（公式见下）→ 4 个目标转子转速；任一个超过 `CHASSIS_WHEEL_MAX_RPM` 时 4 个一起等比例缩小（合成方向不变）。代码里两种轮子写成一套：前左 = k(vx − vy) − r·wz、前右 = k(vx + vy) + r·wz、后右 = k(vx − vy) + r·wz、后左 = k(vx + vy) − r·wz；k = `CHASSIS_XY_FACTOR`（麦轮 1、全向轮 √2/2），r = `CHASSIS_ROTATE_RADIUS_M`（麦轮 a + b、全向轮 R）。轮型用参数值表达，不加开关。
+6. 4 个目标转速交给电机层：`MotorControl_SetTargetSpeed`（转子 rpm，int16）→ 每个电机 `MotorControl_Update(motor, now)`（速度环、电流限幅、100 ms 掉线保护都在里面）。以后功率控制放在 MotorControl_Update 之后、SendAll 之前，按比例缩 4 个 `output_current`。
 
-chassis.c 内部（建议）：
+Infantry_Chassis.c 内部：
 
-- 每个轮子一个 `ChassisWheel_t`，只有两个字段：`DJI_Motor_t motor`（方向在 `motor.motor_direction`，转速反馈看 `motor.speed_rpm`，驱动里已经乘过方向）和 `PID_t speed_pid`（目标转速看 `speed_pid.target`，输出电流看 `speed_pid.out`）。4 个放数组 `chassis_wheel[4]`，下标 0 左前、1 左后、2 右后、3 右前（俯视逆时针，正好是 x 前 y 左坐标系里的第 1~4 象限）。
-- `PID_t chassis_follow_pid`：跟随环。
-- 斜坡后的速度 `chassis_vx_mps`、`chassis_vy_mps`（云台坐标系）、`chassis_wz_dps`：3 个 float，不用结构体。
-- 另外和云台一样：`chassis_cmd`（SetCmd 拷进来的）、`chassis_mode`（实际模式）、`chassis_fault`（掉线锁定）。
-- `Chassis_Init`：4 次 `DJI_M3508_Register`（ID 1~4 用 0x200、槽位 ID−1）；电机层 `MotorControl_Init`（电流限幅、方向，PID 参数全给 0）+ `MotorControl_SetMode(MOTOR_MODE_CURRENT)`；`PID_Init` 4 个速度环（输出和积分项都限在 ±电流限幅）和跟随环。
-- `Chassis_SetCmd`：三种运动模式原样收下，其他值当 RELAX。
+- 4 个电机 `static DJI_Motor_t chassis_motors[4]`，下标 0 前左、1 前右、2 后右、3 后左（俯视顺时针，用户定的；文件里有 `CHASSIS_FL` 等下标）。方向在 `motor.motor_direction`，转速反馈看 `motor.speed_rpm`（驱动里已经乘过方向）。
+- 速度环用电机层自带的（用户的草稿这样写，和果园机器人一样）：速度环参数在初始化时传给 `MotorControl_Init`，PID 就是 `motor.speed.pid`，目标转速看 `motor.speed.target_rpm`。注册完电机层是 `MOTOR_MODE_DISABLE`（输出 0）。切模式用 `MotorControl_SetMode`，而且只在电机层模式真的变了才调：每周期都调会把速度环积分清掉（果园机器人 Chassis_Control.c 里的注释）。
+- 已写（2026-11-01，Claude）：`Infantry_Chassis_Init`：4 次 `DJI_M3508_Register`（ID 1~4 用 0x200、槽位 ID−1）+ `MotorControl_Init`（电流限幅、方向、速度环参数，位置环给 0），任一个失败就返回 HAL_ERROR；`Chassis_SetCmd`：三种运动模式原样收下，其他值当 RELAX。static `chassis_cmd`（SetCmd 拷进来的）。
+- `Chassis_Update`（2026-11-01，用户写了开头，Claude 补完）：`Chassis_ModeUpdate`（掉线锁定，电机层模式只在变了时切：从 RELAX 进运动模式 SetMode(SPEED)、进 RELAX 时 SetMode(DISABLE) 并清斜坡）→ 按模式算 wz → `Chassis_Ramp` → 坐标变换 → `Chassis_WheelRpm`（逆运动学 + 超转速缩小）→ `MotorControl_SetTargetSpeed` → 最后 4 个 `MotorControl_Update`（RELAX 时也调，输出 0）。static 多了 `chassis_mode`、`chassis_fault`、斜坡后的 `chassis_vx_mps`、`chassis_vy_mps`（云台坐标系）、`chassis_wz_dps`，调试时看这几个。
 
 逆运动学：v 是轮子线速度，正 = 这个轮子往让底盘前进的方向滚；wz 先换成 rad/s（× π/180）。
 
@@ -138,20 +142,21 @@ v_右前 = (vx + vy)·√2/2 + R·wz
 - 这里的 vx、vy 是坐标变换后底盘坐标系里的。目标转子转速 rpm = v / 轮子半径 × 60 / (2π) × 减速比（`motor.reduction_ratio`）。
 - 两种轮子符号规律一样，左右两侧的电机方向也一样（见「参考」最后两条）。
 
-chassis_config.h（建议）：
+chassis_config.h：
 
 | 宏 | 内容 |
 |---|---|
-| 4 个电调 ID、4 个方向 | 新车建议 ID 1~4 按下标顺序；方向预计左侧 1、右侧 −1，待核对 |
-| 轮子半径、a、b（全向轮是 R） | 待测 |
-| 电流限幅 | C620 ±16384 对应 ±20 A；先给小（比如 3000），果园机器人最后用 8000 |
-| 速度环 Kp / Ki / Kd | 误差是转子 rpm、输出是电流、dt 1 ms；从 5 / 20 / 0 起调 |
-| `CHASSIS_WHEEL_MAX_RPM` | 转子转速上限，果园机器人用 8000（空载约 9256） |
-| 跟随环 Kp / Kd、`CHASSIS_FOLLOW_MAX_DPS` | Kp 单位是“度/秒 每 度”；先只用 P |
-| `CHASSIS_SPIN_DPS` | 小陀螺转速，先给小（比如 180） |
-| `CHASSIS_ACCEL_MPS2`、`CHASSIS_WZ_ACCEL_DPS2` | 平移、旋转的加速度限制，待调 |
+| `CHASSIS_FL/FR/BR/BL_ESC_ID` | 已写：1~4，按下标顺序；只能 1~4（都走 0x200） |
+| `CHASSIS_FL/FR/BR/BL_DIRECTION` | 已写：前左 1、前右 −1、后右 −1、后左 1（按果园机器人推出来的左 1 右 −1），待核对 |
+| `CHASSIS_CURRENT_LIMIT` | 已写：3000（C620 ±16384 对应 ±20 A；先给小，果园机器人最后用 8000） |
+| `CHASSIS_SPEED_KP/KI/KD` | 已写：5 / 20 / 0（误差是转子 rpm、输出是电流、dt 1 ms；积分项被 motor_control 限在 1000） |
+| `CHASSIS_WHEEL_RADIUS_M`、`CHASSIS_XY_FACTOR`、`CHASSIS_ROTATE_RADIUS_M` | 已写占位：0.076、1（麦轮）、0.40；待测。全向轮改成 0.7071 和轮心到中心距离 |
+| `CHASSIS_WHEEL_MAX_RPM` | 已写：8000（转子转速上限，空载约 9256，果园机器人也用 8000） |
+| `CHASSIS_FOLLOW_KP`、`CHASSIS_FOLLOW_MAX_DPS` | 已写：3（度/秒 每 度）、180；只用 P。主机模型里 Kp 5 以内不超调，8 开始超调约 1.7° |
+| `CHASSIS_SPIN_DPS` | 已写：180（先给小） |
+| `CHASSIS_ACCEL_MPS2`、`CHASSIS_WZ_ACCEL_DPS2` | 已写：3 m/s²（按速度向量长度限）、720 度/s²；待调 |
 
-板间通信（第 3 步，`App/chassis/chassis_link.c/.h`，和 chassis.h 放在一起，帧格式只写在这一处；云台板的工程也编这个文件，只用发送）：
+板间通信（`App/chassis_link.c/.h`，底盘板这一侧 2026-11-01 已写；帧格式写在 chassis_link.h 里，只这一处）：
 
 | 字节 | 内容 |
 |---|---|
@@ -165,30 +170,33 @@ chassis_config.h（建议）：
 
 ```c
 /* chassis_link.h */
-#include "chassis.h"
-#include "can_bus.h"
+#include "Infantry.h"
 
 #define CHASSIS_LINK_CMD_ID         0x110U
 #define CHASSIS_LINK_TIMEOUT_MS     50U
 
-/* 云台板：每 1 ms 调一次，打包后发出去。 */
-HAL_StatusTypeDef ChassisLink_SendCmd(CAN_HandleTypeDef *hcan, const ChassisCmd_t *cmd);
-/* 底盘板：给 0x110 配一个过滤器组（CAN1 用组 2、CAN2 用组 16，can_bus.h 的分配说明里补一行）。 */
+/* 给 0x110 配一个过滤器组：CAN1 用组 2、CAN2 用组 16。CAN 启动前后调都行。 */
 HAL_StatusTypeDef ChassisLink_Init(CAN_HandleTypeDef *hcan);
-/* 底盘板：robot.c 的 CAN 接收回调里，把这路上读到的每一帧都交给它，它只认 0x110。 */
+/* CAN 接收回调（中断）里调：这路上读到的每一帧都交给它，它只认 0x110，只存原始数据和时间。 */
 void ChassisLink_ProcessRxFrame(const CAN_RxHeaderTypeDef *header, const uint8_t data[8]);
-/* 底盘板：每 1 ms 取最新指令；超过 CHASSIS_LINK_TIMEOUT_MS 没收到就给 RELAX。 */
+/* 主循环每 1 ms 调：关中断拷一份再解码；超时（包括上电后还没收到过）给 RELAX、速度 0。 */
 void ChassisLink_GetCmd(uint32_t now_tick, ChassisCmd_t *cmd);
 ```
 
-robot.c（底盘板）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Chassis_Init(&robot_can2)`，第 3 步再加 `ChassisLink_Init(&hcan1)`，失败都进 `Error_Handler()`；`Robot_Loop` 里在发送之前 `ChassisLink_GetCmd(now, &cmd)` → `Chassis_SetCmd(&cmd)` → `Chassis_Update(now)`；CAN 接收回调里 CAN1 的帧也交给 `ChassisLink_ProcessRxFrame`。第 1、2 步还没有云台板时，指令先用调试器改 robot.c 里一个 `volatile ChassisCmd_t`。CMake 加 `App/chassis/chassis.c`（第 3 步再加 `chassis_link.c`）和 include 目录 `App/chassis`。.ioc 不用改。
+- 云台板的发送（`ChassisLink_SendCmd`：按上表打包、`CAN_Bus_SendStdData`）这个工程用不到，没写；云台板接进来时再写，照 chassis_link.h 里的帧格式。
+- 超时按有符号数比：robot.c 读完 now_tick 之后才收到的帧，记下的 tick 会比 now_tick 大，按无符号比会被当成超时。
+
+robot.c（底盘板，2026-11-01 已接好）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Infantry_Chassis_Init(&robot_can2)`、`ChassisLink_Init(&hcan1)`，失败都进 `Error_Handler()`；`Robot_Loop` 里在发送之前 `ChassisLink_GetCmd(now, &cmd)` → `Chassis_SetCmd(&cmd)`，`Chassis_Update` 写好后加在“2. 控制”那里；CAN 接收回调里 CAN1 的每一帧交给 `ChassisLink_ProcessRxFrame` 和 robot_can1 的 manager（各自按 ID 只认自己的），CAN2 的交给 robot_can2。CMake 里 `App/chassis_link.c` 加在 robot.c 旁边（用户的两个文件 CLion 加在了 add_executable 里，也能编）。.ioc 不用改。
+
+- 还没有云台板时测底盘：robot.c 里临时把 `ChassisLink_GetCmd` 换成调试器改的一个 `volatile ChassisCmd_t`，或者用另一块板 / USB-CAN 按上面的格式发 0x110（50 ms 内不发就会 RELAX）。
 
 为什么这样写：
 
 - 模式和跟随环放底盘板，云台板只发意图和云台角：底盘怎么转（跟随环、小陀螺、斜坡、功率）都在一处调；单板方案也是同一个 `ChassisCmd_t`，只是不经过 chassis_link。
 - 平移用云台坐标系：操作手按 W 永远朝枪口走；小陀螺时底盘在下面转，平移方向在地面上不跟着转（2026-11-01 平面模型：360°/s 小陀螺、云台对地不动时，地面上的平移方向误差不到 1e-13°）。
 - 斜坡加在坐标变换**之前**：小陀螺时底盘坐标系里的速度方向一直在转，2 m/s、360°/s 时分量的变化率约 12.6 m/s²。同一个模型里把 3 m/s² 的斜坡放在变换之后，2 m/s 的指令只剩 0.38~0.55 m/s，方向偏 66~83°。
-- 速度环在 chassis.c 里算、电机层只用电流模式（和云台一样）：motor_control 自带速度模式的积分限幅写死 1000（约 1.2 A），果园机器人上坡时就是被它限住、改了驱动才放到 6000；功率控制要在速度环和输出之间按比例缩放 4 个电流，PID 在本模块里算才好插这一步。
+- 速度环用电机层自带的（用户的草稿这样写，和果园机器人一样；之前建议过在模块里自己算）：模块代码少。代价：motor_control 的速度环积分项写死在 1000（约 1.2 A），果园机器人上坡时就是被它限住——到时把果园机器人的 `MotorControl_SetSpeedIntegralLimit`（9 行）移进 Shared（改 Shared 要在根目录 notes 第 7 节记一笔、两个工程都重编）；功率控制只能在 MotorControl_Update 之后改 `output_current`。
+- 板间接收拆成 chassis_link，不放进底盘模块：中断里只拷 8 字节，解码、超时在主循环；底盘模块只认 `ChassisCmd_t`，没有云台板时也能换个指令源测。
 - 一个轮子掉线 4 个都停：少一个轮子出力，合力方向就不对，底盘会乱跑。
 
 容易错的地方：
@@ -203,6 +211,34 @@ robot.c（底盘板）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Ch
 8. 借果园机器人的公式要换坐标系（见「参考」），直接抄符号会全反。
 9. 麦轮平移方向不对、或平移时底盘自己转：先查电调 ID 和位置是否对应、轮子的辊子朝向（装法），这不是改符号能解决的。
 10. 调试器暂停时控制帧停发，C620 停发后怎么处理手册没写：架空测试问题不大，落地前先确认。
+11. `CAN_RxHeaderTypeDef` 里 `IDE` 是帧类型（`CAN_ID_STD` = 0、`CAN_ID_EXT` = 4），帧 ID 在 `StdId` / `ExtId`。用户 2026-11-01 的草稿写成了 `header.IDE == 0x110`，永远不成立。
+
+## 初始化和接收的验证（2026-11-01）
+
+- ARM：清理编译无警告，FLASH 13764 B、RAM 2544 B（那时 `Chassis_Update` 还没被调用，链接时被裁掉）。Chassis_Update 写完后重跑这个测试（robot.c 现在每周期调它），仍是 59 项通过。
+- 主机测试（CLion 自带的 MinGW gcc 13.1，`-Wall -Wextra` 无警告；robot.c、Infantry_Chassis.c、chassis_link.c 原文件 + Shared 的驱动、PID 原文件，HAL 是假的；测试代码在临时目录，不在工程里），59 项全部通过：
+  - 初始化：0x110 的过滤器在 CAN1 组 2、16 位列表、FIFO0；大疆的过滤器 CAN1 组 0、CAN2 组 14；两路 CAN 都启动；CAN2 上注册 4 个电机，`chassis_motors[0~3]` 的电调 ID 1~4、反馈 0x201~0x204、0x200 槽位 0~3、方向 1 / −1 / −1 / 1、电流限幅 3000、速度环 5 / 20 / 0（积分上限 1000）、失能、输出 0；CAN1 上没有电机。
+  - 上电还没收到指令：RELAX；每周期 CAN2 发一帧全 0 的 0x200，CAN1 什么也不发（板间那路上还有云台电机，不能乱发）。
+  - 解码：FOLLOW、vx 1.234、vy −0.567、云台角 −179.99；极端值 ±32.767 m/s、180°；非法模式（9）→ RELAX。
+  - 不收别人的帧：0x111、扩展帧、远程帧、DLC 6、从 CAN2 来的 0x110、CAN1 上云台电机的 0x205 都不改数据。
+  - 超时：最后一帧后 50 ms 还有效，51 ms 起 RELAX、速度清零；帧回来后恢复。比 now_tick 新 1 ms 的帧不算超时。
+  - 关中断拷贝后恢复原来的中断状态；电机反馈同一个回调里照常更新（前右方向 −1 时 1000 rpm 读成 −1000）；重复注册、NULL、不认识的 CAN 句柄都返回 HAL_ERROR，CAN2 上的过滤器在组 16。
+- 反向检查：把超时改成无符号比较、恢复中断改成直接开中断、字节序反过来、去掉帧 ID 检查，四种改法分别有 1、1、3、2 项失败，都被抓到。
+
+## Chassis_Update 的验证（2026-11-01）
+
+- ARM：清理编译无警告，FLASH 20876 B、RAM 2952 B。
+- 主机模型测试（同上，Infantry_Chassis.c 原文件 + Shared 驱动 / PID / user_math 原文件 + 假 HAL；测试代码在临时目录）：电机用惯性为主的模型（原始转速' = 2.5 rpm/s 每单位电流 × 电流 − 转速 / 2 s），电流从 0x200 帧里取（已乘方向），转速按原始方向做成反馈帧送回驱动；底盘实际运动由 4 个轮速反算；云台按 IMU 模式保持对地朝向。53 项全部通过：
+  - 上电时电机还没反馈就要求运动 → 锁住、电流 0；有反馈后仍锁着，给一次 RELAX 才解除（和云台一样，所以云台主控上电要先发 RELAX）。
+  - 不跟随、vx 0 → 1 m/s：斜坡 100 ms 时 0.300；4 个目标都是 2413 转子 rpm（1 m/s，轮半径 0.076）；底盘实际 1.000 m/s 往前，不横移、不转。稳定后速度环积分保持住（没有每周期被清）。
+  - 坐标变换：云台角 90°、沿枪口 0.5 m/s → 前左、后右 −1206，前右、后左 +1206，底盘实际往左 0.5 m/s。
+  - 跟随符号：云台角固定 +10° → wz 30°/s 逆时针（左侧轮负、右侧正）；−10° → −30°/s。
+  - 运动模式之间切换（不跟随 → 小陀螺）不清速度环积分。
+  - 真正的跟随：云台对地 60°、底盘从 0° 起 → 不超调，1.78 s 进 1° 以内，最后差 0.011°。
+  - 小陀螺 180°/s + 沿枪口 1 m/s：给电机的目标反算出来，地面走向误差 ≤ 0.012°、速度 1.000 ± 0.0003 m/s、转速 180 ± 0.03°/s。模型里的实际运动受速度环带宽限制：电流限幅 3000 时电流顶满，走向偏 17.8°、只转到 158°/s；限幅 8000、Kp 5 时峰值电流 4555，走向偏 11.2°；限幅 8000、Kp 15 时偏 4.3°。原因：小陀螺加平移时每个轮子的目标转速按小陀螺的频率正弦变化（180°/s 是 0.5 Hz，平移分量幅值 √2 × 1 m/s），要几 m/s² 的来回加速度，速度环跟不上就有相位滞后。实车上看这一项要先把电流限幅放开、速度环调硬；这个数和电机模型有关，只说明趋势。
+  - 超转速：vx 3、vy 3 → 前右、后左缩到 8000，前左、后右 0；小陀螺 + 3 m/s 时最大 8000。
+  - 运动中一个电机停发反馈：100 ms 时还没锁，102 ms 锁住，4 个都失能、电流 0、斜坡清零；反馈恢复后仍锁着，给一次 RELAX 再给运动才恢复，恢复后 1.000 m/s。非法模式（7）当 RELAX，电流 0。
+- 反向检查：跟随符号反、坐标变换符号反、去掉超转速缩小、每次换模式都 SetMode(SPEED)、去掉掉线锁定、进 RELAX 不清斜坡，六种改法分别有 4、8、2、1、13、1 项失败，都被抓到。
 
 ## 上板步骤与验收（电机到了再做）
 
@@ -240,9 +276,9 @@ robot.c（底盘板）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Ch
 | 轮型 | 待定 |
 | 底盘电机所在总线 | 代码默认 CAN2，待按实际接线确认 |
 | 板间通信总线 | 底盘板默认 CAN1，待按实际接线确认 |
-| 电调 ID ↔ 位置 | 建议 1 左前、2 左后、3 右后、4 右前 |
+| 电调 ID ↔ 位置 | 代码默认 1 前左、2 前右、3 后右、4 后左（俯视顺时针，用户定的编号） |
 | 各轮 motor_direction | 待测（按果园机器人的实测推出来是左 1、右 −1） |
-| 轮子半径、a / b（全向轮 R） | 待测 |
+| 轮子半径、a / b（全向轮 R） | 待测（代码占位 0.076 m、a + b = 0.40 m） |
 | 速度环 PID | 待调（起点 5 / 20 / 0） |
 | 跟随环 Kp、最大 wz | 待调 |
 | 小陀螺转速、两个加速度限制 | 待调 |
