@@ -42,6 +42,8 @@ Shared/Algorithm/user_math.*     Math_Clamp、Math_WrapDeg180
 
 `Robot_Loop()` 每 1 ms：`INS_Update` → `INS_GetFeedback` → `Gimbal_SetImu` → `Gimbal_GetFeedback` → `GimbalTestCmd_Update` → `Gimbal_SetCmd` → `Gimbal_Update` → 每路 CAN `SendAll` 一次。HAL 的 SPI 完成 / 出错回调也在 robot.c，转给 BMI088 驱动。
 
+主机测试在 `Test_Module/Gimbal/HostTest`（2026-11-01 起放进仓库）：电脑上编译 gimbal.c、gimbal_test_cmd.c、DJI 驱动、PID、user_math 的真代码，接两个刚体轴 + 底盘 + 理想 IMU 的模型，13 个场景（RELAX、阶跃、斜坡前馈、限位、扶住松手、IMU 自稳、跨 ±180°、模式切换、各种锁定）。**改了 gimbal / test_cmd / DJI 驱动就跑一遍**，用法见其 README。以前 notes 里记的“主机模型测试”是临时目录里的版本，以这个为准。
+
 gimbal.h 对外：`GimbalMode_e`（RELAX / ENCODER / IMU）、`GimbalCmd_t`（模式 + 两个目标角，坐标系跟着模式走）、`GimbalFeedback_t`（模式 + 编码器角、IMU 角各两个），以及 Init / SetImu / SetCmd / Update / GetFeedback 五个函数。gimbal.h include ins.h 只为用 `InsFeedback_t` 类型。
 
 gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值、上下限位、角度环和速度环 PID、编码器角、电机角速度、斜坡后的目标（存在本模式的坐标系里，IMU 模式下是对地的角）。IMU 数据存一份 `gimbal_imu`。`Gimbal_Update` 按模式分两支，各显式调两次 `Gimbal_AxisControl`，只是传的反馈不同；RELAX 不调，电流为 0。方向存在 `motor.motor_direction`，环的输出就看 `angle_pid.out` / `speed_pid.out`，不另存。速度环目标 = 角度环输出 + 速度前馈（斜坡每毫秒走的角度换算成 dps），再限幅到 `GIMBAL_SPEED_LIMIT_DPS`，看 `speed_pid.target`。
