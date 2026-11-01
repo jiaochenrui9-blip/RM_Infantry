@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-10-31（云台对话：v2 第 2 步云台 IMU 模式代码改好，主机模型测试通过）
+> 最后更新：2026-11-01（底盘对话：建好 Chassis_test 工程、写了 v1 接口草案；第 3~7 节加了底盘的内容）
 
 ## 1. 项目组织
 
@@ -14,7 +14,7 @@ RM_Infantry/
 ├── Shared/                     ← 各工程共用的 BSP / Devices / Algorithm（用法见第 7 节）
 ├── Test_Module/
 │   ├── Gimbal/Gimbal_test/     ← 云台测试工程，进度见其 notes.md
-│   └── Chassis/                ← 底盘测试工程，未开始
+│   └── Chassis/Chassis_test/   ← 底盘测试工程，进度见其 notes.md
 └── （以后）Infantry/            ← 合并工程
 ```
 
@@ -36,14 +36,14 @@ RM_Infantry/
 4. 模块与调度方式无关：`Xxx_Update()` 固定周期调用，dt 用宏写死。测试工程用裸机 1 kHz 循环；合并工程放进 FreeRTOS 任务，模块代码不改。
 5. CubeMX 生成的 main.c 只加两处调用：外设初始化后 `Robot_Init()`，`while(1)` 里一直调 `Robot_Loop()`（内部按 HAL_GetTick 每 1 ms 跑一次）；HAL 回调（如 CAN 接收）放 robot.c。参考实现见 Gimbal_test/App/robot.c。
 6. 和具体车有关的参数放模块自己的 `xxx_config.h`（电调 ID、方向、编码器中值、限位、PID、限幅）；全车 CAN 分配登记在第 4 节。
-7. 外设一律在 .ioc 里配置后生成代码，不手写初始化代码。
+7. 外设一律在 .ioc 里配置后生成代码，不手写初始化代码。CubeMX 也能命令行无界面生成，做法见 Chassis_test/notes.md「工程是怎么建的」。
 8. 改 Shared 里的代码要在这里记一笔，两个测试工程都要重新编译。
 
 ## 3. 统一单位与正方向
 
 - 角度用度（deg），角速度用度/秒（dps）。GM6020 转速反馈 rpm × 6 = dps。
 - 云台：yaw 俯视逆时针为正，pitch 抬头为正。
-- 底盘（建议）：x 向前、y 向左、wz 俯视逆时针为正（和云台 yaw 同向）。
+- 底盘：x 向前、y 向左、wz 俯视逆时针为正（和云台 yaw 同向）；平移速度用 m/s，wz 用度/秒。每个轮子的正方向 = 让底盘前进的方向（Chassis_test v1 草案按这个写）。
 - 电机装反时用 `motor_direction = -1` 修正，让逻辑正方向符合上面的约定。
 - 云台 Feedback 提供 `yaw_rel_deg`（云台相对底盘正前方的角度），底盘跟随云台、运动坐标变换都用它（v1 代码里还叫 `yaw_deg`，v2 改名）。
 - ins（惯导）输出也按这套：云台头坐标系 x 朝枪口、y 朝左、z 朝上；yaw 俯视逆时针为正、pitch 抬头为正。没有磁力计时 yaw 以上电朝向为 0，会漂。
@@ -54,18 +54,19 @@ RM_Infantry/
 |---|---|---|---|---|---|
 | CAN1（代码默认，待按接线确认） | GM6020 yaw | 1 | 0x205 | 0x1FE / 0 | 云台工程已用 |
 | CAN1（代码默认，待按接线确认） | GM6020 pitch | 2 | 0x206 | 0x1FE / 1 | 云台工程已用 |
-| 待定 | M3508 ×4（底盘） | 1~4 | 0x201~0x204 | 0x200 / 0~3 | 底盘工程定 |
+| CAN2（代码默认，待按接线确认） | M3508 ×4（底盘） | 1~4 | 0x201~0x204 | 0x200 / 0~3 | 底盘工程 v1 要用（还没写） |
 
 - 同一路总线上：GM6020 ID 1~4 的反馈 0x205~0x208 和 M3508/M2006 ID 5~8 的反馈相同，不能同时用。
 - GM6020 电压控制帧 0x1FF 与 M3508/M2006 ID 5~8 的控制帧相同；现有驱动用电流控制 0x1FE/0x2FE，不冲突。
 - 1 Mbps 下一个 8 字节标准帧约 111~135 bit，每毫秒理论最多约 7~9 帧。每个 DJI 电机的反馈就占 1 帧/ms，再加控制帧。合并时按负载把电机分到两路 CAN。
+- 底盘默认放 CAN2，和云台分在两路：4 帧反馈 + 1 帧控制 / ms，按上面的帧长算负载约 56%~68%。两个测试工程是分开烧的，现在不冲突；Chassis_test 里改总线只改 robot.c 传给 `Chassis_Init` 的 manager。
 
 ## 5. C 板硬件事实（已对照用户手册 IO 表和原理图）
 
 | 功能 | 引脚 | 备注 |
 |---|---|---|
-| CAN1（2-pin 口） | PD0 RX / PD1 TX | 不是 PB8/PB9（那是 FPC 口的 I2C1） |
-| CAN2（4-pin 口） | PB5 RX / PB6 TX | |
+| CAN1（2-pin 口） | PD0 RX / PD1 TX | 不是 PB8/PB9（那是 FPC 口的 I2C1）。插座线序 1 CANL、2 CANH，和 C620 自带的 2-pin CAN 线一样；两个插座 |
+| CAN2（4-pin 口） | PB5 RX / PB6 TX | 插座线序 1 5V、2 GND、3 CANH、4 CANL；两个插座 |
 | DBUS 遥控 | USART3_RX PC11 | 板上已反相，手册写 100 kbps |
 | BMI088 | SPI1：PB3 SCK / PA7 MOSI / PB4 MISO；CS：加速度计 PA4、陀螺仪 PB0；INT1：加速度计 PC4、陀螺仪 PC5 | SPI 最高 10 MHz |
 | IMU 加热 | TIM10_CH1 PF6 | 手册建议比板子正常工作温度高 15~20 ℃ |
@@ -79,19 +80,20 @@ RM_Infantry/
 | 晶振 | HSE 12 MHz | |
 
 - 原理图上两路 CAN 收发器（TJA1044）后面都有 120 Ω 电阻，应是板载终端电阻 → 总线另一端（最远的电机）打开终端电阻即可。
-- CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复。
+- CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。Gimbal_test 两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复；Chassis_test 两路都开了（2026-11-01，还没上板验证）。
 - GM6020：拨码 1~3 位设 ID（1~7），第 4 位是 CAN 终端电阻。反馈 1 kHz，编码器 0~8191，转速单位 rpm。电流控制 ±16384 对应 ±3 A，需要固件 ≥1.0.11.2，并在 RoboMaster Assistant（≥2.7）里打开电流环。
+- C620 + M3508：电调 ID 1~8 用 SET 键设（步骤见 Chassis_test/notes.md）；电流 ±16384 对应 ±20 A；反馈 0x200 + ID、默认 1 kHz，转速是转子 rpm（M3508 减速比 3591/187 ≈ 19.2）；电调上有 120 Ω 终端电阻开关；不能同时插 CAN 线和 PWM 线。
 
 ## 6. 各模块进度
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
 | 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup |
-| 底盘 | Test_Module/Chassis | 未开始；按第 2、3 节约定写，公共代码按第 7 节引用 Shared |
+| 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。v1（速度闭环 + 逆运动学，轮型未定，麦轮 / 全向轮公式都写了）接口草案在其 notes.md，用户自己写第一版。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`） |
 
 ## 7. Shared 的用法与改动记录
 
-新工程（如底盘测试）照 Gimbal_test 顶层 CMakeLists.txt 的写法引用，`../` 的层数按工程所在位置改：
+新工程照 Gimbal_test 顶层 CMakeLists.txt 的写法引用（Chassis_test 已这样接，2026-11-01；只加了它用到的文件），`../` 的层数按工程所在位置改：
 
 ```cmake
 get_filename_component(SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared" ABSOLUTE)
