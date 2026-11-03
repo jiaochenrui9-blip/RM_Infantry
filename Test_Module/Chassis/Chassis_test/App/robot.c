@@ -5,7 +5,7 @@
 
 #include "can_bus.h"
 #include "dji_motor_manager.h"
-#include "Infantry.h"
+#include "Infantry_Chassis.h"
 #include "chassis_link.h"
 
 /* 每路 CAN 只能有一个 manager，这路上的所有电机都注册进来（见根目录 notes.md 第 2 节）。 */

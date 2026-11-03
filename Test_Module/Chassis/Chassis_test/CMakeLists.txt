@@ -34,7 +34,7 @@ enable_language(C ASM)
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
     App/Infantry_Chassis.c
-    App/Infantry.h)
+    App/Infantry_Chassis.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -44,7 +44,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# 各工程共用的 BSP / Devices / Algorithm 放在 RM_Infantry/Shared，不在本工程目录内
+# 各工程共用的 BSP / Devices / Algorithm / Link 放在 RM_Infantry/Shared，不在本工程目录内
 get_filename_component(SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared" ABSOLUTE)
 if(NOT EXISTS "${SHARED_DIR}")
     message(FATAL_ERROR "Shared code directory not found: ${SHARED_DIR}")
@@ -52,11 +52,11 @@ endif()
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # 本工程的应用层：装配层 + 板间通信（底盘模块的文件在上面 add_executable 里）
+    # 本工程的应用层：装配层（底盘模块的文件在上面 add_executable 里）
     App/robot.c
-    App/chassis_link.c
 
-    # 底盘 v1 用到的公共代码：M3508 驱动、PID、限幅
+    # 底盘 v1 用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅
+    ${SHARED_DIR}/Link/chassis_link.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor_manager.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_m3508.c
@@ -70,6 +70,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
 
+    ${SHARED_DIR}/Link
     ${SHARED_DIR}/Devices/DJI_Driver
     ${SHARED_DIR}/Algorithm
     ${SHARED_DIR}/BSP

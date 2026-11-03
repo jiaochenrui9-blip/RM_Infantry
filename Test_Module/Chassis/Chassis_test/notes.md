@@ -1,7 +1,7 @@
 # Chassis_test 笔记（底盘测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；云台那边踩过的坑见 `Test_Module/Gimbal/Gimbal_test/notes.md` 的「已知问题」，大部分底盘也适用。
-> 最后更新：2026-11-01（建工程；按步兵逻辑定接口；按用户要求写了初始化、板间指令接收和 Chassis_Update：ARM 编译无警告，主机测试 59 + 53 项通过，没上板）
+> 最后更新：2026-11-03（chassis_link 搬到 Shared/Link，`ChassisMode_e`、`ChassisCmd_t` 移进 chassis_link.h，和云台板共用一份；代码没改，固件逐字节相同。云台板的发送同日写好、主机测试通过，见 Gimbal_test/notes.md「板间通信」）
 
 ## 当前状态
 
@@ -12,6 +12,8 @@
 - 参考：用户自己的果园机器人底盘（全向轮，已上板调通），见「参考：果园机器人底盘」。
 - 2026-11-01 用户开始写（`App/Infantry.h`、`App/Infantry_Chassis.c`，速度环用电机层自带的、轮子顺时针编号），并让 Claude 写好初始化和接收指令：`Infantry_Chassis_Init`、`Chassis_SetCmd`、`chassis_config.h`、`chassis_link`（板间帧接收），robot.c 接好。ARM 清理编译无警告（FLASH 13764 B、RAM 2544 B），主机测试通过（见「初始化和接收的验证」），没上板。
 - 2026-11-01 用户写了 `Chassis_Update` 的开头（先切模式、最后统一 `MotorControl_Update`），说后面不太会，让 Claude 写完：四种模式、掉线锁定、斜坡、坐标变换、逆运动学（轮型只体现在两个参数上）、超转速等比例缩小；robot.c 每周期调用。ARM 清理编译无警告（FLASH 20876 B、RAM 2952 B）；主机模型测试 53 项通过（见「Chassis_Update 的验证」），没上板。
+- 2026-11-02 用户把 `App/Infantry.h` 改名为 `App/Infantry_Chassis.h`（include 保护宏还是 `CHASSIS_TEST_INFANTRY_H`，不影响），Infantry_Chassis.c 里加了几处注释。
+- 2026-11-03 为了让云台板用同一份帧格式和类型（用户选的）：`chassis_link.c/.h` 从 App 原样搬到 `Shared/Link`，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h（Infantry_Chassis.h 改成 include 它），CMake 改路径。代码没改：清理编译无警告，FLASH 20876 B、RAM 2952 B，烧进 Flash 的内容和搬之前逐字节相同。云台板的发送同日写好（用户写第一版、Claude 按审查改好），主机上和这边的解包对过，两板联调待做，见 Gimbal_test/notes.md「板间通信」。
 - 第 1、2 步的代码都有了（第 3 步只差云台板的发送）。下一步：电机到了按「上板步骤」标方向、调速度环；轮型定了改 `CHASSIS_XY_FACTOR`、`CHASSIS_ROTATE_RADIUS_M`。
 
 ## 工程是怎么建的（以后改外设照这个做）
@@ -24,7 +26,7 @@
   - 其余（HSE 12 MHz → 168 MHz、CAN 1 Mbps：预分频 3 / BS1 9 / BS2 4、NVIC 优先级分组 4、CAN 接收中断优先级 0）和云台相同。
 - 代码由 STM32CubeMX 6.15.0 生成。这次用的是命令行无界面模式：脚本里写 `config load <ioc>`、`project generate`、`exit`，在 CubeMX 安装目录下运行 `jre\bin\java -jar STM32CubeMX.exe -q <脚本>`（UM1718 第 3.3.2 节）。平时用 GUI 打开 `.ioc` 改完点 GENERATE CODE 即可。
 - 用户代码只在 USER CODE 段里：main.c 的 `#include "robot.h"`、`Robot_Init()`、`Robot_Loop()`，重新生成不会丢。其他全在 App/。
-- 顶层 CMakeLists.txt（CubeMX 只生成一次）：加了 `SHARED_DIR`、`App/robot.c` 和底盘要用的 Shared 代码（dji_motor、dji_motor_manager、dji_m3508、motor_control、PID、user_math、can_bus）。GM6020、M2006、BMI088、IST8310、Attitude 没加。
+- 顶层 CMakeLists.txt（CubeMX 只生成一次）：加了 `SHARED_DIR`、`App/robot.c` 和底盘要用的 Shared 代码（Link/chassis_link、dji_motor、dji_motor_manager、dji_m3508、motor_control、PID、user_math、can_bus）。GM6020、M2006、BMI088、IST8310、Attitude 没加。
 - 编译：`cmake --preset Debug`、`cmake --build --preset Debug`，输出 `build/Debug/Chassis_test.elf`。CLion 打开 `Test_Module/Chassis/Chassis_test`，照云台工程建「OpenOCD 下载并运行」配置，board config 用 `D:\OpenOCD_Config\DAPLink\stm32f4.cfg`。Reset 选 Halt 最稳；这个 cfg 已经把 reset-init 覆盖成空（果园机器人 notes 第 3 节），选 Init 也不会再卡在 SystemClock_Config。
 
 ## 硬件要点（C620 / M3508 / C 板手册，2026-11-01 读过）
@@ -57,19 +59,17 @@
 
 1. **第 1 步：不跟随模式**——坐标变换、逆运动学（含超转速等比例缩小）、4 个速度环、RELAX 和掉线锁定。底盘单独就能测，云台角在调试器里手填。
 2. **第 2 步：跟随云台、小陀螺 + 加速度斜坡**。符号底盘单独能测（云台角填固定值）；真正的跟随效果要云台在 IMU 模式、第 3 步通了以后看。
-3. **第 3 步：板间通信 chassis_link**。底盘板的接收 2026-11-01 已写（用户要求提前做）；云台板的发送和两板联调等两块板都在时做。单板方案不要这一步，robot_cmd 直接填 `ChassisCmd_t`。
+3. **第 3 步：板间通信 chassis_link**。底盘板的接收 2026-11-01 已写（用户要求提前做）；2026-11-03 chassis_link 搬到 Shared/Link、云台板发送写好（主机测试通过），两板联调两块 C 板就能做。单板方案不要这一步，robot_cmd 直接填 `ChassisCmd_t`。
 - **以后**：功率控制（裁判系统给功率上限和缓冲能量，在速度环和输出之间按比例缩小 4 个电流）、超级电容、小陀螺时平移方向的延迟补偿、变速小陀螺、底盘→云台的回传帧（裁判系统接在底盘板时，把热量 / 弹速上限传给云台板）。
 
 ## 接口（2026-11-01 定，按步兵逻辑；初始化、接收、Chassis_Update 都已写）
 
-文件（用户定的名字）：`App/Infantry.h`（类型 + 底盘的函数）、`App/Infantry_Chassis.c`（底盘模块）、`App/chassis_config.h`（参数）、`App/chassis_link.c/.h`（板间指令接收）。
+文件（用户定的名字）：`App/Infantry_Chassis.h`（底盘的函数；2026-11-02 用户从 Infantry.h 改名）、`App/Infantry_Chassis.c`（底盘模块）、`App/chassis_config.h`（参数）、`Shared/Link/chassis_link.c/.h`（板间通信，和云台板共用一份；`ChassisMode_e`、`ChassisCmd_t` 也在这里，2026-11-03 从 Infantry_Chassis.h 移过来）。
 
 数据流：云台板（键鼠 / 遥控 → robot_cmd；云台角来自 `Gimbal_GetFeedback` 的 `yaw_rel_deg`）→ 板间 CAN 0x110 → 底盘板 `ChassisLink_GetCmd` → robot.c → `Chassis_SetCmd` → `Chassis_Update` → 4 个 M3508。
 
 ```c
-/* Infantry.h（模式和指令结构体是用户写的，和这里一样） */
-#include "dji_motor_manager.h"
-
+/* Shared/Link/chassis_link.h（模式和指令结构体是用户写的，2026-11-03 从 Infantry_Chassis.h 移过来，和这里一样） */
 typedef enum
 {
     CHASSIS_MODE_RELAX = 0,     /* 无力：电流 0。上电默认；板间通信超时、电机掉线时也是这个 */
@@ -86,6 +86,7 @@ typedef struct
     float gimbal_yaw_rel_deg;   /* 云台相对底盘正前方的角度（云台的 yaw_rel_deg），俯视逆时针为正，-180~180 */
 } ChassisCmd_t;
 
+/* App/Infantry_Chassis.h：#include "dji_motor_manager.h"、"chassis_link.h"（只用上面两个类型） */
 /* 已写：把 4 个 M3508 注册到这路 CAN 的 manager，必须在 DJI_MotorManager_Start() 之前调用；注册失败返回 HAL_ERROR。 */
 HAL_StatusTypeDef Infantry_Chassis_Init(DJI_MotorManager_t *manager);
 /* 已写：每 1 ms 在 Chassis_Update 之前调，非法模式当 RELAX。 */
@@ -156,7 +157,7 @@ chassis_config.h：
 | `CHASSIS_SPIN_DPS` | 已写：180（先给小） |
 | `CHASSIS_ACCEL_MPS2`、`CHASSIS_WZ_ACCEL_DPS2` | 已写：3 m/s²（按速度向量长度限）、720 度/s²；待调 |
 
-板间通信（`App/chassis_link.c/.h`，底盘板这一侧 2026-11-01 已写；帧格式写在 chassis_link.h 里，只这一处）：
+板间通信（`Shared/Link/chassis_link.c/.h`，和云台板共用一份，2026-11-03 前在本工程 App/ 里；底盘板这一侧 2026-11-01 已写；帧格式写在 chassis_link.h 里，只这一处）：
 
 | 字节 | 内容 |
 |---|---|
@@ -169,9 +170,7 @@ chassis_config.h：
 标准帧 0x110，DLC 8，云台板每 1 ms 发一次，高字节在前（和大疆电机帧一样）。走两块板之间那路 CAN：底盘板默认 CAN1（电机在 CAN2）。
 
 ```c
-/* chassis_link.h */
-#include "Infantry.h"
-
+/* chassis_link.h：上面的 ChassisMode_e、ChassisCmd_t 也定义在这里；下面三个是底盘板调的 */
 #define CHASSIS_LINK_CMD_ID         0x110U
 #define CHASSIS_LINK_TIMEOUT_MS     50U
 
@@ -183,10 +182,10 @@ void ChassisLink_ProcessRxFrame(const CAN_RxHeaderTypeDef *header, const uint8_t
 void ChassisLink_GetCmd(uint32_t now_tick, ChassisCmd_t *cmd);
 ```
 
-- 云台板的发送（`ChassisLink_SendCmd`：按上表打包、`CAN_Bus_SendStdData`）这个工程用不到，没写；云台板接进来时再写，照 chassis_link.h 里的帧格式。
+- 云台板的发送 `ChassisLink_SendCmd`（按上表打包、`CAN_Bus_SendStdData`）：2026-11-03 已写（同一个 chassis_link.c 里），见 Gimbal_test/notes.md「板间通信」。本工程不调它，链接时被裁掉。
 - 超时按有符号数比：robot.c 读完 now_tick 之后才收到的帧，记下的 tick 会比 now_tick 大，按无符号比会被当成超时。
 
-robot.c（底盘板，2026-11-01 已接好）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Infantry_Chassis_Init(&robot_can2)`、`ChassisLink_Init(&hcan1)`，失败都进 `Error_Handler()`；`Robot_Loop` 里在发送之前 `ChassisLink_GetCmd(now, &cmd)` → `Chassis_SetCmd(&cmd)`，`Chassis_Update` 写好后加在“2. 控制”那里；CAN 接收回调里 CAN1 的每一帧交给 `ChassisLink_ProcessRxFrame` 和 robot_can1 的 manager（各自按 ID 只认自己的），CAN2 的交给 robot_can2。CMake 里 `App/chassis_link.c` 加在 robot.c 旁边（用户的两个文件 CLion 加在了 add_executable 里，也能编）。.ioc 不用改。
+robot.c（底盘板，2026-11-01 已接好）：`Robot_Init` 里在 `DJI_MotorManager_Start` 之前 `Infantry_Chassis_Init(&robot_can2)`、`ChassisLink_Init(&hcan1)`，失败都进 `Error_Handler()`；`Robot_Loop` 里在发送之前 `ChassisLink_GetCmd(now, &cmd)` → `Chassis_SetCmd(&cmd)`，`Chassis_Update` 写好后加在“2. 控制”那里；CAN 接收回调里 CAN1 的每一帧交给 `ChassisLink_ProcessRxFrame` 和 robot_can1 的 manager（各自按 ID 只认自己的），CAN2 的交给 robot_can2。CMake 里加了 `${SHARED_DIR}/Link/chassis_link.c` 和 include 目录 `${SHARED_DIR}/Link`（2026-11-03 前是 `App/chassis_link.c`；用户的两个文件 CLion 加在了 add_executable 里，也能编）。.ioc 不用改。
 
 - 还没有云台板时测底盘：robot.c 里临时把 `ChassisLink_GetCmd` 换成调试器改的一个 `volatile ChassisCmd_t`，或者用另一块板 / USB-CAN 按上面的格式发 0x110（50 ms 内不发就会 RELAX）。
 
@@ -197,6 +196,7 @@ robot.c（底盘板，2026-11-01 已接好）：`Robot_Init` 里在 `DJI_MotorMa
 - 斜坡加在坐标变换**之前**：小陀螺时底盘坐标系里的速度方向一直在转，2 m/s、360°/s 时分量的变化率约 12.6 m/s²。同一个模型里把 3 m/s² 的斜坡放在变换之后，2 m/s 的指令只剩 0.38~0.55 m/s，方向偏 66~83°。
 - 速度环用电机层自带的（用户的草稿这样写，和果园机器人一样；之前建议过在模块里自己算）：模块代码少。代价：motor_control 的速度环积分项写死在 1000（约 1.2 A），果园机器人上坡时就是被它限住——到时把果园机器人的 `MotorControl_SetSpeedIntegralLimit`（9 行）移进 Shared（改 Shared 要在根目录 notes 第 7 节记一笔、两个工程都重编）；功率控制只能在 MotorControl_Update 之后改 `output_current`。
 - 板间接收拆成 chassis_link，不放进底盘模块：中断里只拷 8 字节，解码、超时在主循环；底盘模块只认 `ChassisCmd_t`，没有云台板时也能换个指令源测。
+- chassis_link 放 Shared、两个类型放 chassis_link.h（2026-11-03 用户选的）：两块板编译同一份，帧格式和模式编号不会两边对不上。代价是底盘的 Cmd 类型不在底盘模块自己的头文件里（根目录 notes 第 2 节规则 2 的例外）。
 - 一个轮子掉线 4 个都停：少一个轮子出力，合力方向就不对，底盘会乱跑。
 
 容易错的地方：
@@ -263,7 +263,7 @@ robot.c（底盘板，2026-11-01 已接好）：`Robot_Init` 里在 `DJI_MotorMa
 
 第 3 步：
 
-1. 云台板发 0x110，底盘板收到（看 chassis_link 里最后一帧的 tick 跟着走）。
+1. 云台板发 0x110，底盘板收到（看 chassis_link 里最后一帧的 tick 跟着走）。不接电机、两块 C 板就能做的部分见 Gimbal_test/notes.md「板间通信」的验收。
 2. 拔掉板间 CAN 线，50 ms 内底盘无力；插回后按当前指令恢复。
 3. 全车：键鼠切四种模式，平移方向始终跟枪口走；小陀螺时边转边平移，走向不歪。
 

@@ -6,22 +6,7 @@
 #define CHASSIS_TEST_INFANTRY_H
 
 #include "dji_motor_manager.h"
-
-typedef enum
-{
-    CHASSIS_MODE_RELAX = 0,     /* 无力：上电默认；板间通信超时、电机掉线时也是这个 */
-    CHASSIS_MODE_NO_FOLLOW,     /* 不跟随：底盘不转，只按云台朝向平移 */
-    CHASSIS_MODE_FOLLOW,        /* 跟随云台：底盘转到和云台同向 */
-    CHASSIS_MODE_SPIN           /* 小陀螺：底盘按固定角速度一直转，平移仍按云台朝向 */
-} ChassisMode_e;                /* 数值也是板间帧的内容，两块板要一致，别随便调顺序 */
-
-typedef struct
-{
-    ChassisMode_e mode;         /*云台主控配置的底盘模式*/
-    float vx_mps;               /* 平移速度，在云台朝向的坐标系里：沿枪口为正 */
-    float vy_mps;               /* 枪口左边为正 */
-    float gimbal_yaw_rel_deg;   /* 云台相对底盘正前方的角度，来自云台的 yaw_rel_deg */
-} ChassisCmd_t;
+#include "chassis_link.h"       /* 只用 ChassisMode_e、ChassisCmd_t：两块板共用，所以定义在板间通信里；不调它的函数 */
 
 /* 把 4 个 M3508 注册到这路 CAN 的 manager，必须在 DJI_MotorManager_Start() 之前调用。
    注册失败（ID 重复、ID 不在 1~4）返回 HAL_ERROR。 */

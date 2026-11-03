@@ -2,7 +2,7 @@
 // Created by game on 2026/11/1.
 //
 
-#include "Infantry.h"
+#include "Infantry_Chassis.h"
 
 #include <math.h>
 
@@ -88,7 +88,7 @@ void Chassis_SetCmd(const ChassisCmd_t *cmd)
     }
 }
 
-/* 根据指令和电机在线定实际模式。电机层的模式只在真的变了时切：每周期都 SetMode 会把速度环积分清掉。 */
+/*根据命令更新模式，如果命令超过一定时间未更新就一律为RELAX模式，先判断电机是否有掉线的，如果有就置故障位，不要每次都设置模式*/
 static void Chassis_ModeUpdate(uint32_t now_tick)
 {
     ChassisMode_e mode = chassis_cmd.mode;
@@ -106,20 +106,24 @@ static void Chassis_ModeUpdate(uint32_t now_tick)
     {
         chassis_fault = 0U;
     }
+    /*如果电机状态不对就要置故障位，防止底盘出力不对*/
     else if (online == 0U)
     {
         chassis_fault = 1U;     /* 少一个轮子出力，合力方向就不对，4 个都停 */
     }
+
     if (chassis_fault != 0U)
     {
         mode = CHASSIS_MODE_RELAX;
     }
 
+    /*只有模式更换时才要更新模式*/
     if (mode == chassis_mode)
     {
         return;
     }
 
+    /*底盘电机一共就RELAX，SPEED模式这几个*/
     /* 进 RELAX：电机层失能（输出 0），斜坡清零，下次从 0 开始加速。
        从 RELAX 进运动模式：电机层切到速度模式（会清速度环）。运动模式之间切换电机层不动，斜坡接着走。 */
     if (mode == CHASSIS_MODE_RELAX)
@@ -152,6 +156,7 @@ static void Chassis_Ramp(float wz_target_dps)
     float dvy = chassis_cmd.vy_mps - chassis_vy_mps;
     float dv = sqrtf(dvx * dvx + dvy * dvy);
 
+    /*如果速度变化量超过了步长最大值，就要整体限位，否则底盘运动与控制命令不一致*/
     if (dv > step)
     {
         dvx *= step / dv;
@@ -159,6 +164,7 @@ static void Chassis_Ramp(float wz_target_dps)
     }
     chassis_vx_mps += dvx;
     chassis_vy_mps += dvy;
+    /*底盘旋转速度单独限幅*/
     chassis_wz_dps += Math_Clamp(wz_target_dps - chassis_wz_dps, -wz_step, wz_step);
 }
 
@@ -193,7 +199,7 @@ static void Chassis_WheelRpm(float vx, float vy, float wz_dps, float rpm[CHASSIS
     }
 }
 
-/*电机的控制逻辑，由主循环调用*/
+/*电机的控制逻辑：先更新模式，然后得出转速W,然后根据命令融合底盘轮速*/
 void Chassis_Update(uint32_t now_tick)
 {
     float wz_target_dps = 0.0f;

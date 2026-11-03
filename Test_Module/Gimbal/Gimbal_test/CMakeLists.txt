@@ -42,7 +42,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# 各工程共用的 BSP / Devices / Algorithm 放在 RM_Infantry/Shared，不在本工程目录内
+# 各工程共用的 BSP / Devices / Algorithm / Link 放在 RM_Infantry/Shared，不在本工程目录内
 get_filename_component(SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared" ABSOLUTE)
 if(NOT EXISTS "${SHARED_DIR}")
     message(FATAL_ERROR "Shared code directory not found: ${SHARED_DIR}")
@@ -68,6 +68,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${SHARED_DIR}/Devices/BMI088/BMI088.c
     ${SHARED_DIR}/Devices/IST8310/IST8310.c
     ${SHARED_DIR}/BSP/can_bus.c
+    # 板间通信，和底盘板共用一份：云台板只用 ChassisLink_SendCmd
+    ${SHARED_DIR}/Link/chassis_link.c
 )
 
 # Add include paths
@@ -82,6 +84,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${SHARED_DIR}/Devices/IST8310
     ${SHARED_DIR}/Algorithm
     ${SHARED_DIR}/BSP
+    ${SHARED_DIR}/Link
 )
 
 # Add project symbols (macros)

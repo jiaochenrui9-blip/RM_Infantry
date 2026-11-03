@@ -1,7 +1,7 @@
 # Gimbal_test 笔记（云台测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；驱动移植细节和验证记录见本目录 `README.md`；BMI088 / Attitude 的接入说明见 `Shared/Devices/BMI088/README.md`。
-> 最后更新：2026-10-31（v2 第 2 步云台 IMU 模式：用户写第一版，Claude 按审查意见改好）
+> 最后更新：2026-11-03（板间通信：定了云台板发底盘指令的接口，chassis_link 搬到 Shared/Link；用户写了第一版，Claude 按审查改好，主机测试通过，还没上板）
 
 ## 当前状态
 
@@ -9,6 +9,8 @@
 - App：编码器定角度（v1，2026-10-29 加了速度前馈）+ ins（v2 第 1 步）+ 云台 IMU 模式（v2 第 2 步），共 790 行。v1 主机闭环模型测试通过（见 README）。**云台还没接电机上板**：方向、中值、限位、PID 都是占位值。
 - v2（IMU 定角度）接口 2026-10-29 已定，见「v2 接口」一节；用户自己写第一版。第 1 步 ins 已改好并接入 robot.c。2026-10-30 首次上板（只接调试器 3.3 V、没接电机）：程序正常跑，ins 桌面验收全部通过（单位矩阵下符号都符合约定），C 板轴向对应到实物的哪条边待用户确认，见「第 1 步进度」。第 2 步（云台 IMU 模式）2026-10-31 用户写了第一版，Claude 按审查意见改好：ARM 清理编译无警告（FLASH 36568 B、RAM 3376 B），主机模型测试通过；**还没上板**，见「第 2 步进度」。
 - 之前带 IMU 模式的完整版（935 行）备份在 `Test_Module/Gimbal/Backup/App_full_2026-10-27`，不参与编译。用户觉得变量太多、太乱，所以重写成现在这版；反思写进了全局 CLAUDE.md。v2 以新接口为准，备份只作参考。
+- 2026-11-01 用户把 yaw 软限位改成 ±180（不限位）。
+- 板间通信（双板，云台板每 1 ms 给底盘板发底盘指令）：2026-11-03 定了接口，见「板间通信」一节。`chassis_link.c/.h` 已从 Chassis_test 搬到 `Shared/Link`（两块板共用一份），本工程 CMake 已加；同日用户写了第一版（`ChassisLink_SendCmd`、gimbal_test、robot.c），审查发现 vx 的高字节写错（1 m/s 收成 0.488、−0.5 收成 +0.012）、联锁看的是指令模式而不是实际模式；用户让 Claude 按审查改好：ARM 清理编译无警告（FLASH 37112 B、RAM 3384 B），主机往返、联锁测试全过；**还没上板**，见「板间通信」的「第一版审查」。
 
 ## 已知问题 / 坑
 
@@ -38,9 +40,10 @@ Gimbal_test/App/
 └── test_cmd/
     └── gimbal_test_cmd.c / .h   调试器指令源（合并后由 robot_cmd 取代）
 Shared/Algorithm/user_math.*     Math_Clamp、Math_WrapDeg180
+Shared/Link/chassis_link.*       板间通信，和底盘板共用一份：云台板只调 ChassisLink_SendCmd
 ```
 
-`Robot_Loop()` 每 1 ms：`INS_Update` → `INS_GetFeedback` → `Gimbal_SetImu` → `Gimbal_GetFeedback` → `GimbalTestCmd_Update` → `Gimbal_SetCmd` → `Gimbal_Update` → 每路 CAN `SendAll` 一次。HAL 的 SPI 完成 / 出错回调也在 robot.c，转给 BMI088 驱动。
+`Robot_Loop()` 每 1 ms：`INS_Update` → `INS_GetFeedback` → `Gimbal_SetImu` → `Gimbal_GetFeedback` → `GimbalTestCmd_Update` → `Gimbal_SetCmd` → `Gimbal_Update` → 每路 CAN `SendAll` 一次 → `ChassisLink_SendCmd` 把底盘指令发给底盘板。HAL 的 SPI 完成 / 出错回调也在 robot.c，转给 BMI088 驱动。
 
 gimbal.h 对外：`GimbalMode_e`（RELAX / ENCODER / IMU）、`GimbalCmd_t`（模式 + 两个目标角，坐标系跟着模式走）、`GimbalFeedback_t`（模式 + 编码器角、IMU 角各两个），以及 Init / SetImu / SetCmd / Update / GetFeedback 五个函数。gimbal.h include ins.h 只为用 `InsFeedback_t` 类型。
 
@@ -50,7 +53,7 @@ gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值
 
 | 变量 | 内容 |
 |---|---|
-| `gimbal_test` | 指令：`mode`（0 无力 / 1 编码器闭环 / 2 IMU 闭环）、`yaw_deg`、`pitch_deg`（模式 1 相对底盘，模式 2 相对地面）；方波：`yaw_square_deg`、`pitch_square_deg`（幅值，0 为不加）、`square_period_ms` |
+| `gimbal_test` | 指令：`gimbal_mode`（0 无力 / 1 编码器闭环 / 2 IMU 闭环；2026-11-03 用户从 `mode` 改名）、`yaw_deg`、`pitch_deg`（模式 1 相对底盘，模式 2 相对地面）；底盘（经板间 CAN 发给底盘板）：`chassis_mode`（0 无力 / 1 不跟随 / 2 跟随 / 3 小陀螺）、`vx_mps`、`vy_mps`（云台坐标系：沿枪口、枪口左边为正）；方波：`yaw_square_deg`、`pitch_square_deg`（幅值，0 为不加）、`square_period_ms` |
 | `gimbal_yaw`、`gimbal_pitch` | 每个轴：`angle_deg`、`rate_dps`、`target_deg`、`speed_pid.target`（目标角速度，含前馈）、`angle_pid.out`（其中角度环的部分）、`speed_pid.out`（电流）、`motor.encoder`（原始编码器） |
 | `gimbal_mode`、`gimbal_fault` | 实际模式、是否被锁定（电机掉线，或 IMU 模式下 IMU 失效） |
 | `gimbal_imu` | 云台收到的 IMU 数据（`Gimbal_SetImu` 拷进来的 `InsFeedback_t`），应和 `ins_feedback` 一样 |
@@ -58,13 +61,14 @@ gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值
 | `ins_init_status`、`ins_calibrate_count`、`ins_last_tick` | BMI088 初始化结果（0 正常，见 `BMI088_Status_t`）；标定进度（到 1000 为止）；最后一次样本的 tick（正常时跟着 HAL tick 走） |
 | `BMI088_DATA` | 驱动里的原始数据（C 板坐标系）：`acc_g`、`gyro_dps`（已减零偏）、`gyro_offset`。标定 C 板轴向时看它 |
 
-流程：上电 → RELAX 下手转标定中值和方向 → `gimbal_test.mode` 改成 1（IMU 模式改成 2，上电 1 s 后再切）→ 再改 `yaw_deg` / `pitch_deg`。改 mode 时目标会自动同步成新模式下的当前角，所以要先切模式、再改目标。
+流程：上电 → RELAX 下手转标定中值和方向 → `gimbal_test.gimbal_mode` 改成 1（IMU 模式改成 2，上电 1 s 后再切）→ 再改 `yaw_deg` / `pitch_deg`。改 mode 时目标会自动同步成新模式下的当前角，所以要先切模式、再改目标。
 
 ## 版本规划
 
 - **v1 编码器定角度**：代码已完成，待上板标定和调参。
 - **v2 IMU 定角度**：接口已定（见下一节），分三步：ins（已完成，桌面验收通过）→ 云台 IMU 模式（代码 10-31 改好、主机模型测试通过；上板验收要等 v1 调通、C 板装到云台）→ 加热恒温。
 - **v3 遥控器**：DR16 接 USART3（PC11），手册写 100 kbps；其余串口参数本目录没有 DR16 手册，用前核对。
+- **板间通信（双板）**：2026-11-03 定了云台板发底盘指令的接口（见「板间通信」），用户写；两块 C 板就能验收，不用电机。
 - **合并准备**：定单板 / 双板；按根目录 notes.md 的 CAN 表分配负载。
 
 ## v2 接口（2026-10-29 定，用户自己写第一版）
@@ -248,6 +252,106 @@ robot.c：`Robot_Loop()` 第 0 步改成 `INS_Update(now)`、`INS_GetFeedback(&i
 - 要做的：.ioc 配 TIM10_CH1（PF6）PWM；用 `BMI088_ReadTemperature` 读温度（阻塞读，要在 DMA 空闲时调，即处理完样本、启动下一次之前；温度寄存器 1.28 s 才更新一次）；PID 控占空比，目标比板子正常工作温度高 15~20 ℃（用户手册）。
 - 对接口的影响：要先升到温度再标定零偏。标定已经在 `INS_Update` 里了，加热只是在标定前加一个“等温度到”的阶段；它的长短不是固定样本数，到时候用状态枚举比用样本计数清楚。
 
+## 板间通信：云台板发底盘指令（2026-11-03 定接口，用户写）
+
+双板方案里云台板是主控：每 1 ms 把底盘指令 `ChassisCmd_t` 经板间 CAN 帧 0x110 发给底盘板。底盘板的接收 2026-11-01 已写好，帧格式见 `Shared/Link/chassis_link.h` 开头（解释见 Chassis_test/notes.md「接口」）。
+
+2026-11-03 已做（Claude，按用户的选择）：`chassis_link.c/.h` 从 Chassis_test/App 原样搬到 `Shared/Link`，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，两个工程编译同一份，帧格式和模式编号只有一处；chassis_link.h 加了 `ChassisLink_SendCmd` 的声明；本工程 CMake 加了 `Shared/Link/chassis_link.c` 和 include 目录 `Shared/Link`。代码逻辑没改：两个工程清理编译无警告，烧进 Flash 的内容和搬之前逐字节相同。
+
+数据流：`gimbal_test`（调试器改）+ `Gimbal_GetFeedback` 的 `mode`、`yaw_rel_deg` → `GimbalTestCmd_Update` → `ChassisCmd_t` → `ChassisLink_SendCmd(&hcan1, …)` → 0x110 → 底盘板 `ChassisLink_GetCmd` → `Chassis_SetCmd`。合并后指令源换成 robot_cmd（遥控 / 键鼠），发送这一段不变。
+
+```c
+/* Shared/Link/chassis_link.h（声明已加，函数体写在 chassis_link.c） */
+/* 主循环每 1 ms 调一次，放在各路 SendAll 之后；hcan 传两块板之间那路（云台板默认 CAN1）。按上面的帧格式打包发出。
+   只发不收，不用 Init：CAN 已由 DJI_MotorManager_Start 启动。速度、角度先限到 int16 装得下的范围再转换。
+   cmd 为 NULL 返回 HAL_ERROR；其余返回 CAN_Bus_SendStdData 的结果，3 个发送邮箱都满时是 HAL_BUSY（这一帧丢掉，下一毫秒照常发）。 */
+HAL_StatusTypeDef ChassisLink_SendCmd(CAN_HandleTypeDef *hcan, const ChassisCmd_t *cmd);
+
+/* gimbal_test_cmd.h：include chassis_link.h（只用它的类型），GimbalTest_t 加 3 个字段，Update 多一个输出。
+   字段名按用户第一版：原来的 mode 改名 gimbal_mode，三个新字段放在 pitch_deg 后面 */
+#include "chassis_link.h"
+
+typedef struct
+{
+    GimbalMode_e gimbal_mode;
+    float yaw_deg;
+    float pitch_deg;
+    ChassisMode_e chassis_mode;     /* 底盘：0 无力 / 1 不跟随 / 2 跟随云台 / 3 小陀螺 */
+    float vx_mps;                   /* 平移速度，沿枪口为正，m/s */
+    float vy_mps;                   /* 枪口左边为正，m/s */
+    /* ……三个方波字段不变…… */
+} GimbalTest_t;
+
+void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
+                          GimbalCmd_t *gimbal_cmd, ChassisCmd_t *chassis_cmd);
+```
+
+要写的三处：
+
+1. chassis_link.c 的 `ChassisLink_SendCmd`：
+   - `data[0]` = mode，`data[1]` = 0；
+   - vx、vy × 1000 是 mm/s，云台角 × 100 是 0.01°；每个先 `Math_Clamp` 到 ±32767，再 `roundf` 四舍五入，再转 `int16_t`；
+   - 高字节在前写进 `data[2..7]`：照文件里的 `ChassisLink_ReadS16` 反着写一个 WriteS16（高字节 `(uint8_t)((uint16_t)v >> 8)`，低字节 `(uint8_t)v`）；
+   - 最后 `return CAN_Bus_SendStdData(hcan, CHASSIS_LINK_CMD_ID, data, 8U);`；
+   - 要加 `#include <math.h>`（roundf）和 `"user_math.h"`（两个工程都编了 user_math.c）。
+2. `GimbalTestCmd_Update`：底盘指令的 mode、vx、vy 取 `gimbal_test` 的三个新字段，`gimbal_yaw_rel_deg` 填 `feedback->yaw_rel_deg`；mode 是 FOLLOW 或 SPIN、而云台**实际**模式 `feedback->mode` 不是 IMU 时，降成 NO_FOLLOW。`gimbal_test` 的初值不用改：没写的字段为 0，底盘就是 RELAX、速度 0。
+3. robot.c 的 `Robot_Loop`：多一个 `ChassisCmd_t chassis_cmd`（原来的 `cmd` 改名 `gimbal_cmd`，免得分不清）；第 1 步改成 `GimbalTestCmd_Update(now, &feedback, &gimbal_cmd, &chassis_cmd)`；第 3 步两个 SendAll 之后加 `(void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);`；加 `#include "chassis_link.h"`。`Robot_Init`、CAN 接收回调、CMake 都不用改。
+
+为什么这样写：
+
+- 打包写在 chassis_link 里、不写在 robot.c：帧格式（字节位置、单位、字节序）和底盘板的解包在同一个文件里，改的时候对着改。
+- 不加 Init、模块里不存 hcan：只发不收，不用配过滤器；hcan 每次传进去，发送这边没有状态。
+- 发的是 `yaw_rel_deg`（编码器角，相对底盘）：底盘的坐标变换和跟随环要的就是云台相对底盘的角，不是对地的 IMU 角；它在任何云台模式下都有。
+- FOLLOW、SPIN 只在云台 IMU 模式下放行（Chassis_test/notes.md「容易错的地方」第 1 条）：编码器模式下云台跟着底盘转，yaw_rel 不变——FOLLOW 时只要 yaw_rel 不为 0，底盘就一直转下去；SPIN 时云台被底盘带着转，平移方向也跟着转，车在地上走圆圈。云台 RELAX（包括被锁住）时没力，可能被底盘靠摩擦带着转，跟随就可能一直追。
+- 降成 NO_FOLLOW 而不是 RELAX：底盘还有力，wz 按斜坡停下来（720°/s² 时从 180°/s 停下约 0.25 s），平移照常；RELAX 是断电滑行。判断用实际模式、不用指令：云台被锁在 RELAX 时，指令还是 IMU。
+- 联锁放在指令源：链路只管传；底盘板不知道云台在什么模式。
+- SendCmd 放在 SendAll 之后：每毫秒 CAN1 上云台板只发 0x1FE 和 0x110 两帧，3 个邮箱够用；两帧都在邮箱里时 bxCAN 按 ID 先发 0x110（`TransmitFifoPriority = DISABLE`），先后其实无所谓。
+- 每 1 ms 发：底盘板 50 ms 超时，偶尔丢一帧不要紧；云台角的延迟也小（小陀螺 180°/s 时 1 ms 差 0.18°）。
+
+容易错的地方：
+
+1. float 转 int16 前先限幅：超出范围直接转在 C 里是未定义行为。本工程的编译器实际是先转成 32 位、再取低 16 位（`vcvt.s32.f32` + `sxth`，2026-11-03 看过汇编），40 m/s 的 40000 会变成 −25536，方向反了。
+2. 用 roundf，别直接截断：float 存不准小数，2.10° × 100 截断是 209、1.004 m/s × 1000 截断是 1003（主机上试过：0.001~5 m/s 每 1 mm/s 取一个值，45 个少 1；0.01~180° 每 0.01° 取一个值，1143 个少 1）。对控制没影响，但验收对数时会以为错了。
+3. 字节序：高字节在前，和底盘板的 `ChassisLink_ReadS16` 对应。负数直接转成 uint16 再拆高低字节（有符号转无符号按模 65536 算，C 里有定义）。
+4. 返回 HAL_OK 只说明进了发送邮箱，不说明底盘板收到：本工程 `AutoRetransmission = DISABLE`，每帧只发一次，总线上没有别的节点应答（底盘板和电机都没上电）就丢掉，下一帧照常进邮箱。收没收到只能在底盘板上看。
+5. 只接调试器 3.3 V 时这路 CAN 发不出去：收发器的 5 V 没电，几毫秒就 bus-off（已知问题第 11 条）。本工程 .ioc 没开 Automatic Bus-Off Management，bus-off 后要复位才恢复；底盘工程开了。两块板都要有 5 V（接 24 V 或插 micro USB）。想省掉复位，就在本工程 .ioc 里也把两路 CAN 的这一项改成 Enable，再生成代码。
+6. 上电默认 RELAX，RELAX 要保持一段时间：底盘电机还没反馈时收到运动模式，底盘会锁住，要再收到一次 RELAX 才解除（和云台一样）。两块板的 1 ms 不同步，底盘板每毫秒只取最新一帧，偶尔有一帧被下一帧盖掉、没被读到，所以 RELAX 不能只发一帧。调试器改值、遥控拨杆都远长于 1 ms，现在不成问题；以后 robot_cmd 别写成“只发一帧 RELAX”。
+
+验收（两块 C 板就能做，不用电机）：
+
+1. 接线：两块板的 CAN1（2-pin 口）直连，CANL 接 CANL、CANH 接 CANH；两块板都接 24 V 或插 USB。按原理图两块板都有板载 120 Ω（根目录 notes 第 5 节），正好是总线两头的两个终端；以后这路上挂 GM6020 时，它们的终端电阻都关。
+2. 只有一个调试器时：云台板上把 `gimbal_test` 的初值临时写成 `.gimbal_mode = GIMBAL_MODE_IMU, .chassis_mode = CHASSIS_MODE_FOLLOW, .vx_mps = -1.234f, .vy_mps = 0.567f`，烧好后让它自己跑；调试器接底盘板（Chassis_test），看：
+   - `chassis_link_tick` 跟着 HAL tick 走（每毫秒都收到）；
+   - Infantry_Chassis.c 的 `chassis_cmd`：mode 1、vx −1.234、vy 0.567、gimbal_yaw_rel_deg 0（yaw 电机没接，编码器角一直是 0）。云台指令是 IMU，但没电机时被锁在 RELAX，联锁看实际模式才会把 FOLLOW 降成 1；收到 2 就是联锁看成了指令模式。vx 取负数、绝对值超过 0.256 m/s，高字节才不为 0，字节拼错能看出来（第一版的错误会收成 −0.210）。底盘没电机，`chassis_fault` = 1、`chassis_mode` 是 RELAX，这是对的；`chassis_cmd` 是收到的指令，不受影响。
+   - 测完把初值改回去。有两个调试器就直接在云台板上改 `gimbal_test`。
+   - 这一条原来（2026-11-03 定接口时）写的是 vx 0.123、云台保持无力：vx 的高字节正好是 0，云台指令和实际都是 RELAX，下面「第一版审查」里的两个错都看不出来，已改。
+3. 断线：拔掉板间线，50 ms 后 `chassis_cmd` 变成 RELAX、速度 0；插回后恢复。云台板被调试器暂停也一样（停发就等于断线）。
+4. 接上 yaw 电机（24 V）后：RELAX 下手转云台，底盘板的 `chassis_cmd.gimbal_yaw_rel_deg` 跟着变，俯视逆时针为正。
+5. 全车（电机都在时）：Chassis_test/notes.md「上板步骤」的第 3 步。
+
+### 第一版审查（2026-11-03）
+
+用户写了 chassis_link.c 的 `ChassisLink_BuildFrame` + `ChassisLink_SendCmd`、gimbal_test 的三个字段和联锁、robot.c 的发送。审查方法：ARM 清理编译；主机测试（CLion 自带的 MinGW gcc 13.1，`-Wall -Wextra`；chassis_link.c、gimbal_test_cmd.c 原文件 + 假 HAL，测试代码在临时目录），把云台这边打包的帧直接喂给同一个文件里的底盘解包，看收到的值。
+
+- 对的：帧 ID、DLC、mode 字节、`data[1]` 为 0（`data` 初始化成 0）；vy 和云台角的高低字节；先限幅再转 int16；NULL 返回 HAL_ERROR；底盘指令的 vx、vy、云台角分别取自 gimbal_test 和 feedback；robot.c 在 SendAll 之后发。ARM 清理编译无警告（FLASH 37008 B、RAM 3384 B）；Chassis_test 的固件没变（底盘板不调发送，被裁掉）。
+- 要改：
+  1. chassis_link.c 第 91 行 `data[2] = (int8_t)cmd->vx_mps;`：写进去的是 m/s 的整数部分，不是 `vx_int16` 的高字节。主机测试 9 组里错 7 组：0.5 → 0.244、1.0 → 0.488、2.0 → 0.720、−0.5 → +0.012（方向反了）、−1.0 → −0.232。只改这一行后 9 组全对。vx 在 0~0.255 m/s 时高字节本来就是 0，所以小的正速度看不出来。
+  2. 联锁（gimbal_test_cmd.c 第 38 行）看的是 `gimbal_test.gimbal_mode`（指令），应该看 `feedback->mode`（实际）：云台被锁在 RELAX（上电 1 s 内就切 IMU、IMU 失效、电机掉线）时指令仍是 IMU，FOLLOW、SPIN 照样发出去（主机测试：指令 IMU、实际 RELAX，给 SPIN 发出 3）。
+  3. 联锁把降级写回了 `gimbal_test.chassis_mode`（第 41 行），调试器里的输入被改掉：先给底盘 FOLLOW、再把云台切 IMU，云台进了 IMU，底盘还是 NO_FOLLOW，要重新输一次 2。用局部变量降级、只改发出去的指令即可。第 2、3 条这样改后，主机测试 7 项全过。
+- 建议改（不影响结果）：
+  - 删掉第 4、5 行的 `<sys/types.h>`、`<sys/_intsup.h>`（应该是 CLion 自动加的）：用不到；`_intsup.h` 是 newlib 的内部头文件，换个编译器就没有（主机测试要放一个空文件才编得过）。
+  - 6 个 `(int8_t)` 改成 `(uint8_t)`（`data` 是 uint8_t）：现在靠 GCC 的实现定义行为（有符号数右移、超出范围转 int8）才对，开 `-Wconversion` 时这 6 行都报警告。按上面写一个和 `ChassisLink_ReadS16` 对应的 WriteS16，3 个量各调一次，就不会再出第 1 条那种抄错一行的问题。
+  - BuildFrame 里写上 `data[1] = 0U;`：帧的 8 个字节在一个函数里写全，不依赖调用者清零。
+  - 没用 roundf：截断最多差 1 个单位（2.10° 收成 2.09°），对控制没影响，验收对数时注意。
+  - robot.c 第 78 行的注释不对：SendAll 只是把帧放进发送邮箱就返回，不等发完；两帧都在邮箱里时硬件按 ID 先发 0x110，也谈不上阻塞电机帧。放在 SendAll 之后，只是邮箱不够时先让电机帧进邮箱。调用前加 `(void)`（和 SendAll 一致）；robot.c 直接用到 `ChassisCmd_t` 和 `ChassisLink_SendCmd`，自己 `#include "chassis_link.h"`（现在是经 gimbal_test_cmd.h 间接带进来的，换成 robot_cmd 后就没了）。
+  - gimbal_test_cmd.h：第 26 行注释还写着“改 mode”；`vx_mps`、`vy_mps` 没写坐标系和正方向；Update 的声明里形参叫 `cmd`、定义里叫 `gimbal_cmd`。gimbal_test_cmd.c 第 47 行的注释：底盘板不只用云台角做跟随，平移的坐标变换也用它。
+- 改正（2026-11-03，用户让 Claude 按上面改）：
+  - chassis_link.c：删掉两个 `sys/` 头文件，加 `<math.h>`；加 `ChassisLink_WriteS16`（和 ReadS16 对应，先转 uint16 再拆高低字节）；BuildFrame 里三个量限幅后 `roundf` 再转 int16，`data[1] = 0U`，三个量各调一次 WriteS16；SendCmd 里 `data` 不再先清零（BuildFrame 8 个字节都写）。
+  - gimbal_test_cmd.c：联锁看 `feedback->mode`，用局部变量 `chassis_mode` 降级，不改 `gimbal_test`；云台角那行的注释改成“坐标变换和跟随都用它”。gimbal_test_cmd.h：补了 vx、vy 的坐标系和正方向、chassis_mode 的降级说明，注释里的 mode 改成 gimbal_mode，声明的形参名和定义一致。
+  - robot.c：`#include "chassis_link.h"`；调用前加 `(void)`；注释改成实际原因（邮箱不够时先让电机帧进邮箱；两帧都进了邮箱时硬件按 ID 先发 0x110，和调用顺序无关）。
+- 改正后的验证：ARM 清理编译无警告（Gimbal_test FLASH 37112 B、RAM 3384 B；Chassis_test 的固件和改之前逐字节相同）；chassis_link.c 加 `-Wextra -Wconversion` 也没有警告；主机测试（同上，不再需要给 `_intsup.h` 放空文件）：往返 9 组全对（2.10° 收成 2.10），验收值 vx −1.234、vy 0.567 收到原值，超范围饱和在 ±32.767 m/s、±327.67°、不翻符号，NULL 返回 HAL_ERROR；联锁 7 项全过（指令 IMU、实际 RELAX 时 FOLLOW / SPIN 发 1，云台进了 IMU 后 FOLLOW 自动恢复，`gimbal_test.chassis_mode` 不被改）。
+- 下一步：按上面验收的第 1~3 条在两块 C 板上测。
+
 ## v1 调试步骤与验收
 
 1. 看反馈：上电默认 RELAX，只发 0 电流。手转时 `gimbal_yaw.motor.encoder` 跟着变。
@@ -269,7 +373,7 @@ robot.c：`Robot_Loop()` 第 0 步改成 `INS_Update(now)`、`INS_GetFeedback(&i
 | yaw 中值（encoder） | 待测 |
 | pitch 中值（encoder） | 待测 |
 | pitch 上限 / 下限（deg） | 待测（代码占位 20 / -15） |
-| yaw 限位 | 待定（代码占位 ±90；有滑环就写 ±180） |
+| yaw 限位 | 代码 2026-11-01 用户改成 ±180（不限位）；以前占位 ±90 |
 | yaw / pitch 的 motor_direction | 待测 |
 | 速度环 / 角度环 PID | 待调（代码占位：角度 Kp 8，速度 Kp 20） |
 | C 板轴向（静止时读 +1 g 的轴朝哪、各轴右手定则正转方向） | 2026-10-30 实测：板子平放时 +z 朝上（读 +0.99 g，当时哪面朝上待确认）；手转测试第一段第 4 步抬起的边在 +y 方向，第二段先抬的边在 −x 方向、后抬的在 +x 方向。面对 +y 那条边时 +x 在右手边。对应实物的哪条边待用户确认 |

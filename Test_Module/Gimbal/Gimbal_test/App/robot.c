@@ -5,6 +5,7 @@
 #include "spi.h"
 
 #include "can_bus.h"
+#include "chassis_link.h"
 #include "dji_motor_manager.h"
 #include "BMI088.h"
 #include "gimbal.h"
@@ -49,7 +50,8 @@ void Robot_Loop(void)
     uint32_t now = HAL_GetTick();
     InsFeedback_t imu;
     GimbalFeedback_t feedback;
-    GimbalCmd_t cmd;
+    GimbalCmd_t gimbal_cmd;
+    ChassisCmd_t chassis_cmd;
 
     if (now == robot_last_tick)
     {
@@ -64,8 +66,8 @@ void Robot_Loop(void)
 
     /* 1. 指令：测试工程用调试变量；合并后换成 robot_cmd */
     Gimbal_GetFeedback(&feedback);
-    GimbalTestCmd_Update(now, &feedback, &cmd);
-    Gimbal_SetCmd(&cmd);
+    GimbalTestCmd_Update(now, &feedback, &gimbal_cmd, &chassis_cmd);
+    Gimbal_SetCmd(&gimbal_cmd);
 
     /* 2. 控制：以后发射、底盘的 Update 也加在这里 */
     Gimbal_Update(now);
@@ -73,6 +75,10 @@ void Robot_Loop(void)
     /* 3. 发送：所有模块算完后，每路 CAN 每周期只发一次 */
     (void)DJI_MotorManager_SendAll(&robot_can1);
     (void)DJI_MotorManager_SendAll(&robot_can2);
+
+    /* 板间指令 0x110 发给底盘板（两块板之间那路，云台板默认 CAN1）。放在 SendAll 后面：
+       邮箱不够时先让电机帧进邮箱。两帧都进了邮箱时，硬件按 ID 先发 0x110，和调用顺序无关。 */
+    (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
 }
 
 /* HAL 的 CAN 接收回调：每次读一帧，按总线交给对应的 manager。
