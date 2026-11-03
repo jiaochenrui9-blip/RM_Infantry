@@ -14,6 +14,7 @@
 - 2026-11-01 用户写了 `Chassis_Update` 的开头（先切模式、最后统一 `MotorControl_Update`），说后面不太会，让 Claude 写完：四种模式、掉线锁定、斜坡、坐标变换、逆运动学（轮型只体现在两个参数上）、超转速等比例缩小；robot.c 每周期调用。ARM 清理编译无警告（FLASH 20876 B、RAM 2952 B）；主机模型测试 53 项通过（见「Chassis_Update 的验证」），没上板。
 - 2026-11-02 用户把 `App/Infantry.h` 改名为 `App/Infantry_Chassis.h`（include 保护宏还是 `CHASSIS_TEST_INFANTRY_H`，不影响），Infantry_Chassis.c 里加了几处注释。
 - 2026-11-03 为了让云台板用同一份帧格式和类型（用户选的）：`chassis_link.c/.h` 从 App 原样搬到 `Shared/Link`，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h（Infantry_Chassis.h 改成 include 它），CMake 改路径。代码没改：清理编译无警告，FLASH 20876 B、RAM 2952 B，烧进 Flash 的内容和搬之前逐字节相同。云台板的发送同日写好（用户写第一版、Claude 按审查改好），主机上和这边的解包对过，两板联调待做，见 Gimbal_test/notes.md「板间通信」。
+- 2026-11-03 整车主机仿真放进仓库：`Test_Module/CarSim`，云台板 + 底盘板的真代码（含本工程的 Infantry_Chassis.c、Shared/Link）编在一起，接 4 个 M3508 麦轮刚体底盘 + 云台模型，12 个场景（RELAX、不跟随直走 / 横移、跟随、边走边转、小陀螺、超速等比例缩小、编码器模式下跟随降级、板间断线、轮子掉线锁定、模式切换）全部通过。**改了底盘代码就跑一遍**，用法见其 README。以前 notes 里记的主机测试是临时目录里的，以它为准。
 - 第 1、2 步的代码都有了（第 3 步只差云台板的发送）。下一步：电机到了按「上板步骤」标方向、调速度环；轮型定了改 `CHASSIS_XY_FACTOR`、`CHASSIS_ROTATE_RADIUS_M`。
 
 ## 工程是怎么建的（以后改外设照这个做）

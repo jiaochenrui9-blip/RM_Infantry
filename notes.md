@@ -17,6 +17,7 @@ RM_Infantry/
 ├── Test_Module/
 │   ├── Gimbal/Gimbal_test/     ← 云台测试工程，进度见其 notes.md
 │   ├── Gimbal/HostTest/        ← 云台主机测试：电脑上编译真代码 + 电机模型，改了云台代码就跑一遍（见其 README）
+│   ├── CarSim/                 ← 整车主机仿真：云台板 + 底盘板真代码 + 整车模型，测各模式的配合（见其 README）
 │   └── Chassis/Chassis_test/   ← 底盘测试工程，进度见其 notes.md
 └── （以后）Infantry/            ← 合并工程
 ```
