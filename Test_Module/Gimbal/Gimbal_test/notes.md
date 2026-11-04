@@ -11,7 +11,7 @@
 - 之前带 IMU 模式的完整版（935 行）备份在 `Test_Module/Gimbal/Backup/App_full_2026-10-27`，不参与编译。用户觉得变量太多、太乱，所以重写成现在这版；反思写进了全局 CLAUDE.md。v2 以新接口为准，备份只作参考。
 - 2026-11-01 用户把 yaw 软限位改成 ±180（不限位）。
 - 板间通信（双板，云台板每 1 ms 给底盘板发底盘指令）：2026-11-03 定了接口，见「板间通信」一节。`chassis_link.c/.h` 已从 Chassis_test 搬到 `Shared/Link`（两块板共用一份），本工程 CMake 已加；同日用户写了第一版（`ChassisLink_SendCmd`、gimbal_test、robot.c），审查发现 vx 的高字节写错（1 m/s 收成 0.488、−0.5 收成 +0.012）、联锁看的是指令模式而不是实际模式；用户让 Claude 按审查改好：ARM 清理编译无警告（FLASH 37112 B、RAM 3384 B），主机往返、联锁测试全过；**还没上板**，见「板间通信」的「第一版审查」。
-- 2026-11-04：云台电机可能从 GM6020 换成灵足 RS05。用户让先把旧 RS05 工程（`C:\Clion\RS05`）按云台需要改好、驱动搬进 `Shared/Devices/RS05`，**本工程先不动，还是 GM6020**。换的时候按「换 RS05」改。
+- 2026-11-04：云台电机可能从 GM6020 换成灵足 RS05。用户让先把旧 RS05 工程（`C:\Clion\RS05`）按云台需要改好、驱动搬进 `Shared/Devices/RS05`，**本工程先不动，还是 GM6020**。同日用户想在 CLion 里看到它，CMake 加了 rs05.c 和 include 目录，没有代码调用，固件和加之前逐字节相同。换的时候按「换 RS05」改。
 
 ## 已知问题 / 坑
 
@@ -42,6 +42,7 @@ Gimbal_test/App/
     └── gimbal_test_cmd.c / .h   调试器指令源（合并后由 robot_cmd 取代）
 Shared/Algorithm/user_math.*     Math_Clamp、Math_WrapDeg180
 Shared/Link/chassis_link.*       板间通信，和底盘板共用一份：云台板只调 ChassisLink_SendCmd
+Shared/Devices/RS05/rs05.*       RS05 驱动：编了但还没调用，换 RS05 时用（见「换 RS05」）
 ```
 
 `Robot_Loop()` 每 1 ms：`INS_Update` → `INS_GetFeedback` → `Gimbal_SetImu` → `Gimbal_GetFeedback` → `GimbalTestCmd_Update` → `Gimbal_SetCmd` → `Gimbal_Update` → 每路 CAN `SendAll` 一次 → `ChassisLink_SendCmd` 把底盘指令发给底盘板。HAL 的 SPI 完成 / 出错回调也在 robot.c，转给 BMI088 驱动。
@@ -359,7 +360,7 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 
 用户 2026-11-03 定的：云台只用电流模式，别的都去掉；两个轴都换；接 CAN1；canTimeout 100 ms；CAN1 打开自动重发。2026-11-04 用户让先只做驱动，本工程不动。
 
-现状：驱动 `Shared/Devices/RS05/rs05.c/.h`，和 `C:\Clion\RS05` 里的是同一份（用法、协议、主机测试、单电机上板步骤见 `C:\Clion\RS05\notes.md`）。主机测试 98 项全过，**还没上板**。本工程的 CMake 没加它，固件没变。
+现状：驱动 `Shared/Devices/RS05/rs05.c/.h`，和 `C:\Clion\RS05` 里的是同一份（用法、协议、主机测试、单电机上板步骤见 `C:\Clion\RS05\notes.md`）。主机测试 98 项全过，**还没上板**。本工程的 CMake 2026-11-04 已经加了 rs05.c 和 include 目录（用户想在 CLion 里看到），还没有代码调用，链接时整个被裁掉，烧进 Flash 的内容和加之前逐字节相同。
 
 ### 要改的地方
 
@@ -369,7 +370,7 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 | gimbal.c | 见下面的几条 |
 | gimbal_config.h | `*_ESC_ID` → `*_CAN_ID`（上位机里设，两个电机要不同）。<br>`*_ECD_OFFSET` → `*_ZERO_RAD`（float，RELAX 下扶到中值，读 `motor.position_rad`）。<br>`GIMBAL_CURRENT_LIMIT` 5000 → 1.0（A，约 0.67 N·m，和 GM6020 的 5000 ≈ 0.68 N·m 差不多）。<br>速度环 PID 占位值按同样力矩换算：GM6020 单位 × 约 0.0002（3/16384 × 0.741 / 0.67），Kp 20 → 0.004；不换的话 1°/s 的误差就给 20 A。<br>`GIMBAL_PITCH_GRAVITY_FF` 单位改成 A |
 | robot.c | 两个 DJI manager 换成一个 `RS05_Manager_t`（CAN1）。<br>Init 顺序：`RS05_Manager_Init` → `Gimbal_Init` → `INS_Init` → `RS05_Manager_Start`。<br>接收回调里把 CAN1 的帧交给 `RS05_Manager_ProcessRxFrame`；第 3 步换成 `RS05_Manager_SendAll`。<br>云台板上没有大疆电机了，DJI manager 删掉，以后加发射机构再加回来 |
-| CMakeLists.txt | 加 `Shared/Devices/RS05/rs05.c` 和 include 目录；去掉 DJI_Driver 的 6 个 .c 和 include 目录 |
+| CMakeLists.txt | `Shared/Devices/RS05/rs05.c` 和 include 目录已经加了（2026-11-04）；换的时候去掉 DJI_Driver 的 6 个 .c 和 include 目录 |
 | Gimbal_test.ioc | CAN1 的 Automatic Retransmission 改成 Enable（.ioc 里是 `CAN1.NART=DISABLE`，生成 `AutoRetransmission = ENABLE`），用 CubeMX 重新生成 |
 | test_cmd、ins、chassis_link | 不动 |
 | HostTest、CarSim（主机测试，2026-11-03 进的仓库） | 现在按 GM6020 模拟：编 DJI 驱动，模型发 0x205 / 0x206 反馈，从 0x1FE 取电流。<br>换了以后改成编 rs05.c；模型按 RS05 应答：每收到一帧指令回一帧类型 2，走使能序列，从写 iq_ref 的帧取电流（约 0.67 N·m/A）。<br>两个假 can_bus 还要补 `CAN_Bus_SendExtData`、`CAN_Bus_ConfigExtIdMask`。电机模型可以照 `C:\Clion\RS05\notes.md` 里主机测试的写法 |

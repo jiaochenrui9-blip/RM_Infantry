@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-11-04（云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020、没编它。第 2、4、5、6、7 节有改动）
+> 最后更新：2026-11-04（云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020，CMake 编了 rs05.c 但没有调用。第 2、4、5、6、7 节有改动）
 
 ## 1. 项目组织
 
@@ -27,7 +27,7 @@ RM_Infantry/
 | 层 | 内容 | 位置 |
 |---|---|---|
 | BSP | 只封装 HAL 外设：can_bus；以后 USB 虚拟串口、SPI、UART、DWT | Shared/BSP |
-| Devices | 器件驱动：DJI 电机、BMI088、IST8310、RS05（2026-11-04 加，还没有工程编它）；以后 DR16 | Shared/Devices |
+| Devices | 器件驱动：DJI 电机、BMI088、IST8310、RS05（2026-11-04 加，Gimbal_test 编了但还没调用）；以后 DR16 | Shared/Devices |
 | Algorithm | 与硬件无关：PID、user_math（限幅、角度回绕）、Attitude（Mahony 姿态解算）；以后斜坡等 | Shared/Algorithm |
 | Link | 板间通信：帧格式、打包 / 解包。chassis_link（云台板发底盘指令、底盘板收），两块板编译同一份 | Shared/Link |
 | App 模块 | gimbal（Gimbal_test 已有）、chassis；以后 shoot、ins、robot_cmd | 各工程 App/ |
@@ -137,4 +137,4 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-10-29 | Attitude 加 `Attitude_InitFromAcc()`：没有磁力计时用静止时的加速度平均值初始化 roll / pitch（yaw = 0），算法和 `Attitude_InitializeQuaternion` 前半段相同；原有函数未改 | Gimbal_test 清理编译无警告；主机测试（真 Attitude.c）初始化后 pitch 与真值一致；未上板 |
 | 2026-11-03 | 新增 `Shared/Link/chassis_link.c/.h`：从 Chassis_test/App 原样搬来，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，加了 `ChassisLink_SendCmd` 的声明（函数体用户写）。两个工程的 CMake 都加了它和 include 目录 `Shared/Link` | 两个工程清理编译无警告，烧进 Flash 的内容和改之前逐字节相同（Gimbal_test FLASH 36568 B / RAM 3376 B，Chassis_test 20876 B / 2952 B）；云台工程还没调用，chassis_link 整个被链接器裁掉 |
 | 2026-11-03 | `Shared/Link/chassis_link.c` 加云台板发送：`ChassisLink_SendCmd` + `ChassisLink_BuildFrame`（用户写第一版）、`ChassisLink_WriteS16`；按审查改了 vx 高字节、`(int8_t)` → `(uint8_t)`、限幅后 `roundf`、删两个 `sys/` 头文件。接收部分没动 | 两个工程清理编译无警告（Gimbal_test FLASH 37112 B / RAM 3384 B；Chassis_test 不调发送，固件和改之前逐字节相同）；主机测试：往返 9 组、饱和、NULL 都对；未上板 |
-| 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。两个工程都没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）；rs05.c 在云台工程的编译环境下单独编译无警告；主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
+| 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。同日用户想在 CLion 里看到它，Gimbal_test 的 CMake 加了 rs05.c 和 include 目录，还没有代码调用；Chassis_test 没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）。Gimbal_test 加进 CMake 后，烧进 Flash 的内容和加之前逐字节相同，ELF 里没有 RS05 的符号（整个被链接器裁掉）。主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
