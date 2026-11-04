@@ -1,7 +1,7 @@
 # Gimbal_test 笔记（云台测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；驱动移植细节和验证记录见本目录 `README.md`；BMI088 / Attitude 的接入说明见 `Shared/Devices/BMI088/README.md`。
-> 最后更新：2026-11-03（板间通信：定了云台板发底盘指令的接口，chassis_link 搬到 Shared/Link；用户写了第一版，Claude 按审查改好，主机测试通过，还没上板）
+> 最后更新：2026-11-04（云台电机可能换成 RS05：驱动写好放在 Shared/Devices/RS05，本工程还是 GM6020、代码没动；换的步骤见「换 RS05」）
 
 ## 当前状态
 
@@ -11,6 +11,7 @@
 - 之前带 IMU 模式的完整版（935 行）备份在 `Test_Module/Gimbal/Backup/App_full_2026-10-27`，不参与编译。用户觉得变量太多、太乱，所以重写成现在这版；反思写进了全局 CLAUDE.md。v2 以新接口为准，备份只作参考。
 - 2026-11-01 用户把 yaw 软限位改成 ±180（不限位）。
 - 板间通信（双板，云台板每 1 ms 给底盘板发底盘指令）：2026-11-03 定了接口，见「板间通信」一节。`chassis_link.c/.h` 已从 Chassis_test 搬到 `Shared/Link`（两块板共用一份），本工程 CMake 已加；同日用户写了第一版（`ChassisLink_SendCmd`、gimbal_test、robot.c），审查发现 vx 的高字节写错（1 m/s 收成 0.488、−0.5 收成 +0.012）、联锁看的是指令模式而不是实际模式；用户让 Claude 按审查改好：ARM 清理编译无警告（FLASH 37112 B、RAM 3384 B），主机往返、联锁测试全过；**还没上板**，见「板间通信」的「第一版审查」。
+- 2026-11-04：云台电机可能从 GM6020 换成灵足 RS05。用户让先把旧 RS05 工程（`C:\Clion\RS05`）按云台需要改好、驱动搬进 `Shared/Devices/RS05`，**本工程先不动，还是 GM6020**。换的时候按「换 RS05」改。
 
 ## 已知问题 / 坑
 
@@ -353,6 +354,64 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
   - robot.c：`#include "chassis_link.h"`；调用前加 `(void)`；注释改成实际原因（邮箱不够时先让电机帧进邮箱；两帧都进了邮箱时硬件按 ID 先发 0x110，和调用顺序无关）。
 - 改正后的验证：ARM 清理编译无警告（Gimbal_test FLASH 37112 B、RAM 3384 B；Chassis_test 的固件和改之前逐字节相同）；chassis_link.c 加 `-Wextra -Wconversion` 也没有警告；主机测试（同上，不再需要给 `_intsup.h` 放空文件）：往返 9 组全对（2.10° 收成 2.10），验收值 vx −1.234、vy 0.567 收到原值，超范围饱和在 ±32.767 m/s、±327.67°、不翻符号，NULL 返回 HAL_ERROR；联锁 7 项全过（指令 IMU、实际 RELAX 时 FOLLOW / SPIN 发 1，云台进了 IMU 后 FOLLOW 自动恢复，`gimbal_test.chassis_mode` 不被改）。
 - 下一步：按上面验收的第 1~3 条在两块 C 板上测。
+
+## 换 RS05（2026-11-04 定方案，还没换）
+
+用户 2026-11-03 定的：云台只用电流模式，别的都去掉；两个轴都换；接 CAN1；canTimeout 100 ms；CAN1 打开自动重发。2026-11-04 用户让先只做驱动，本工程不动。
+
+现状：驱动 `Shared/Devices/RS05/rs05.c/.h`，和 `C:\Clion\RS05` 里的是同一份（用法、协议、主机测试、单电机上板步骤见 `C:\Clion\RS05\notes.md`）。主机测试 98 项全过，**还没上板**。本工程的 CMake 没加它，固件没变。
+
+### 要改的地方
+
+| 文件 | 改什么 |
+|---|---|
+| gimbal.h | `#include "dji_motor_manager.h"` 换成 `"rs05.h"`；`Gimbal_Init` 的两个参数换成 `RS05_Manager_t *` |
+| gimbal.c | 见下面的几条 |
+| gimbal_config.h | `*_ESC_ID` → `*_CAN_ID`（上位机里设，两个电机要不同）。<br>`*_ECD_OFFSET` → `*_ZERO_RAD`（float，RELAX 下扶到中值，读 `motor.position_rad`）。<br>`GIMBAL_CURRENT_LIMIT` 5000 → 1.0（A，约 0.67 N·m，和 GM6020 的 5000 ≈ 0.68 N·m 差不多）。<br>速度环 PID 占位值按同样力矩换算：GM6020 单位 × 约 0.0002（3/16384 × 0.741 / 0.67），Kp 20 → 0.004；不换的话 1°/s 的误差就给 20 A。<br>`GIMBAL_PITCH_GRAVITY_FF` 单位改成 A |
+| robot.c | 两个 DJI manager 换成一个 `RS05_Manager_t`（CAN1）。<br>Init 顺序：`RS05_Manager_Init` → `Gimbal_Init` → `INS_Init` → `RS05_Manager_Start`。<br>接收回调里把 CAN1 的帧交给 `RS05_Manager_ProcessRxFrame`；第 3 步换成 `RS05_Manager_SendAll`。<br>云台板上没有大疆电机了，DJI manager 删掉，以后加发射机构再加回来 |
+| CMakeLists.txt | 加 `Shared/Devices/RS05/rs05.c` 和 include 目录；去掉 DJI_Driver 的 6 个 .c 和 include 目录 |
+| Gimbal_test.ioc | CAN1 的 Automatic Retransmission 改成 Enable（.ioc 里是 `CAN1.NART=DISABLE`，生成 `AutoRetransmission = ENABLE`），用 CubeMX 重新生成 |
+| test_cmd、ins、chassis_link | 不动 |
+| HostTest、CarSim（主机测试，2026-11-03 进的仓库） | 现在按 GM6020 模拟：编 DJI 驱动，模型发 0x205 / 0x206 反馈，从 0x1FE 取电流。<br>换了以后改成编 rs05.c；模型按 RS05 应答：每收到一帧指令回一帧类型 2，走使能序列，从写 iq_ref 的帧取电流（约 0.67 N·m/A）。<br>两个假 can_bus 还要补 `CAN_Bus_SendExtData`、`CAN_Bus_ConfigExtIdMask`。电机模型可以照 `C:\Clion\RS05\notes.md` 里主机测试的写法 |
+
+gimbal.c：
+
+- `GimbalAxis_t`：`DJI_Motor_t motor` → `RS05_Motor_t motor`，`ecd_offset` → `zero_rad`，加 `int8_t direction`。RS05 驱动不管方向，方向只在下面两处用。
+- `Gimbal_AxisInit`：`RS05_Register(bus, &axis->motor, can_id)`，不用 MotorControl。
+- `Gimbal_AxisRead`：每周期直接读电机里的反馈，不用判断有没有新帧。
+  - `angle_deg = direction × Math_WrapDeg180((position_rad − zero_rad) × 57.2958)`
+  - `rate_dps = direction × velocity_rad_s × 57.2958`
+  - 角度是 ±4π 循环的，差值折到 ±180° 后和循环无关。
+- `Gimbal_AxisOutput`：`RS05_SetCurrent(&axis->motor, gimbal_mode != GIMBAL_MODE_RELAX, direction × 限幅后的电流)`。RELAX 时驱动发停止帧，电机进 Reset、真的没力。
+- 在线判断换成 `RS05_IsOnline(&motor, now_tick, GIMBAL_OFFLINE_TIMEOUT_MS)`：100 ms 内有反馈，并且没有故障位。
+- 单位宏 `GIMBAL_DEG_PER_ECD`、`GIMBAL_DPS_PER_RPM` 换成 `GIMBAL_DEG_PER_RAD`。
+- 去掉 `dji_gm6020.h`、`motor_control.h`，直接 `#include "PID.h"`（现在是经 motor_control.h 间接带进来的）。
+- `Gimbal_AxisControl`、`Gimbal_UpdateMode`、IMU 模式、重力前馈都不动。
+
+### CAN（这几条是换的时候必须注意的）
+
+- 负载：每个 RS05 每毫秒一帧指令 + 一帧应答，都是扩展帧（131~160 bit）。两个 RS05 加 0x110 约 64%~78%，现在两个 GM6020 是 44%~54%。双板方案嫌 CAN1 太满，可以把 RS05 接云台板的 CAN2（单板方案 CAN2 是底盘，不行），只改 robot.c 一处；不过 0x110 要的 CAN1 就得另外启动（现在是电机 manager 的 Start 顺带启动的）。
+- 仲裁：RS05 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110、比发给 RS05 的所有指令（使能 0x0C0、停止 0x100、写参数 0x480）都优先。
+  - 现在 CAN1 是 `AutoRetransmission = DISABLE`，仲裁输了也不重发。按现在 robot.c 的顺序（先发电机帧、后发 0x110）：yaw 指令先发出去，邮箱里 0x110 比 pitch 指令优先，接着发 0x110。0x110 发完时，yaw 的应答如果已经准备好，就和 pitch 指令同时起步，pitch 指令输掉、丢掉；RELAX 时丢的是 0x110。
+  - 会不会撞上取决于电机回应答的延迟（手册没写）。GM6020 时没这个问题，因为 0x1FE、0x110 都比它的反馈（0x205、0x206）优先。
+  - 所以要开自动重发。代价：总线上没有别的节点应答时（电机、底盘板都没上电），3 个邮箱一直重发、占着，新帧返回 HAL_BUSY；有节点上电后先发出邮箱里最多 3 帧旧帧。RELAX 时那是停止帧，闭环时是旧的 iq_ref，电机刚上电在 Reset，不会执行。
+  - 不开的话，robot.c 要先发 0x110、再发 RS05，让 C 板这三帧背靠背发完。这靠时序，主循环被中断拖慢就可能又撞上。
+  - 不开重发还有一个后果：使能序列里某一帧在总线上丢了，驱动发现不了（"2 ms 没回反馈就重来"只看电机有没有在回话）。比如刚上电的电机丢了 run_mode 那一帧，就会停在运控模式里，写 iq_ref 不出力、反馈却显示在运行，要给一次 RELAX 再进闭环才恢复。
+- 邮箱：F4 每路 3 个发送邮箱。每周期 yaw、pitch 各一帧，加 0x110，正好 3 个，这一路上别再加别的周期帧。
+- 过滤器：RS05 用 CAN1 组 1（can_bus.h 预留的），只收类型 2。底盘板的 CAN1 也在这一路上，它的过滤器只收标准帧，RS05 的帧进不来。
+
+### 和 GM6020 不一样的地方
+
+- RELAX 时电机断开（停止帧，进 Reset）。闭环时驱动先发 4 帧使能序列（写 run_mode、写 canTimeout、写 iq_ref = 0、使能），约 4 ms 后才出力。
+- 调试器暂停：暂停时 HAL tick 不走，云台不会判掉线（GM6020 也是）。区别在电机侧：RS05 设了 canTimeout，100 ms 收不到指令就进 Reset；继续运行后驱动自己重新使能（约 5 ms）。暂停期间 pitch 会掉下来，继续后按速度限幅（200°/s）拉回来。
+- 故障位（欠压、三相电流、过温、磁编码、堵转过载、未标定）不为 0 → 算掉线 → 云台锁住。pitch 一直顶在机械限位上出力可能触发堵转过载。这一版不清故障，出现了给电机断电重启。
+- 有 7.75:1 减速箱，齿隙手册没写。IMU 模式下齿隙在环里，调参时留意。
+- 角速度分辨率约 0.09°/s（GM6020 是 6°/s），速度环的 D 项能用了。
+
+### 上板顺序
+
+1. 先在 `C:\Clion\RS05` 里单电机按它 notes 的上板步骤走一遍，特别是"上电绝对角"：断电转输出轴 90° 再上电，`position_rad` 应变约 1.57。不对的话中值不能写死，上面 AxisRead 的算法要改。
+2. 再按上面改本工程，连同 HostTest、CarSim 的电机模型一起改，两个主机测试都跑通后再上板，然后按「v1 调试步骤」从头标定、调参。
 
 ## v1 调试步骤与验收
 

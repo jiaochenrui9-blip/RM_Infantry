@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-11-03（板间通信：chassis_link 搬到 Shared/Link，`ChassisMode_e`、`ChassisCmd_t` 移进去，两块板共用一份；云台板发送：用户写了第一版，Claude 按审查改好，主机测试通过，还没上板。第 1、2、4、6、7 节有改动）
+> 最后更新：2026-11-04（云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020、没编它。第 2、4、5、6、7 节有改动）
 
 ## 1. 项目组织
 
@@ -27,7 +27,7 @@ RM_Infantry/
 | 层 | 内容 | 位置 |
 |---|---|---|
 | BSP | 只封装 HAL 外设：can_bus；以后 USB 虚拟串口、SPI、UART、DWT | Shared/BSP |
-| Devices | 器件驱动：DJI 电机、BMI088、IST8310；以后 DR16 | Shared/Devices |
+| Devices | 器件驱动：DJI 电机、BMI088、IST8310、RS05（2026-11-04 加，还没有工程编它）；以后 DR16 | Shared/Devices |
 | Algorithm | 与硬件无关：PID、user_math（限幅、角度回绕）、Attitude（Mahony 姿态解算）；以后斜坡等 | Shared/Algorithm |
 | Link | 板间通信：帧格式、打包 / 解包。chassis_link（云台板发底盘指令、底盘板收），两块板编译同一份 | Shared/Link |
 | App 模块 | gimbal（Gimbal_test 已有）、chassis；以后 shoot、ins、robot_cmd | 各工程 App/ |
@@ -70,6 +70,11 @@ RM_Infantry/
 - 板间帧 0x110 不在大疆电机的过滤范围（0x200~0x20F）里，要单独配过滤器组：CAN1 用组 2、CAN2 用组 16（组 1 / 15 是 can_bus.h 里给扩展帧设备留的）。0x110 比大疆的控制帧（0x1FE~0x2FE）优先级高。
 - 板间那路（双板默认）：两个 GM6020 的反馈 + 0x1FE + 0x110 = 4 帧/ms，按上面的帧长约 44%~54%。底盘板的 CAN1 也挂在这路上，它在这路上什么也不发；它的大疆过滤器会收进云台电机的 0x205 / 0x206，没注册电机，直接忽略。以后发射机构的电机别再往这路加。
 - 两个工程的 CAN 都是 `AutoRetransmission = DISABLE`：每帧只发一次，出错或没有应答就丢掉，下一周期照常发。
+- RS05（云台可能换成它，还没换；细节见 Gimbal_test/notes.md「换 RS05」）：
+  - 私有协议是扩展帧，每个电机每毫秒一帧指令 + 一帧应答，每帧 131~160 bit。两个 RS05 加 0x110 在一路上约 64%~78%。
+  - 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110 和发给 RS05 的所有指令都优先。`AutoRetransmission = DISABLE` 时，C 板的帧和应答同时起步就会输掉仲裁、直接丢，所以换的那一路要在 .ioc 里打开自动重发。
+  - 过滤器用 CAN1 组 1、CAN2 组 15（can_bus.h 预留的），只收类型 2。
+  - F4 每路只有 3 个发送邮箱，RS05 每个电机每周期占一个。两个 RS05 加 0x110 正好 3 个，这一路上别再加别的周期帧。
 
 ## 5. C 板硬件事实（已对照用户手册 IO 表和原理图）
 
@@ -93,12 +98,19 @@ RM_Infantry/
 - CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。Gimbal_test 两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复；Chassis_test 两路都开了（2026-11-01，还没上板验证）。
 - GM6020：拨码 1~3 位设 ID（1~7），第 4 位是 CAN 终端电阻。反馈 1 kHz，编码器 0~8191，转速单位 rpm。电流控制 ±16384 对应 ±3 A，需要固件 ≥1.0.11.2，并在 RoboMaster Assistant（≥2.7）里打开电流环。
 - C620 + M3508：电调 ID 1~8 用 SET 键设（步骤见 Chassis_test/notes.md）；电流 ±16384 对应 ±20 A；反馈 0x200 + ID、默认 1 kHz，转速是转子 rpm（M3508 减速比 3591/187 ≈ 19.2）；电调上有 120 Ω 终端电阻开关；不能同时插 CAN 线和 PWM 线。
+- 灵足 RS05（手册在 `C:\Users\Lenovo\Desktop\Data\01_硬件资料\手册\RS05\RS05使用说明书_260713.pdf`，没放进 硬件资料/）：
+  - 电气：额定 48 V，15~60 V 可用；额定 1.6 N·m，对应相电流峰值 2.4 A（约 0.67 N·m/A）；峰值 5.5 N·m，对应 11 A。
+  - 机械：7.75:1 减速；编码器 14 bit 单圈绝对值。
+  - 接口：CAN 1 Mbps；插头 XT30(2+2)，电源和 CAN 在一个插头上；手册没提终端电阻。
+  - 协议：电机只在收到指令时回反馈；canTimeout 出厂是 0（不启用）；运行中不能切模式。
+  - 上电后角度在 0~2π，看起来上电就知道输出轴在一圈内的绝对角度，待上板验证。
+  - 驱动和测试工程见 `C:\Clion\RS05\notes.md`。
 
 ## 6. 各模块进度
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
-| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」 |
+| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」。2026-11-04：云台电机可能换成 RS05。驱动已写好，放在 `Shared/Devices/RS05`（在 `C:\Clion\RS05` 里测，还没上板）；云台工程还是 GM6020，换的步骤见其 notes.md「换 RS05」 |
 | 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。2026-11-01 用户开始写（Infantry.h / Infantry_Chassis.c，速度环用电机层自带的），按用户要求 Claude 写好了初始化、板间指令接收（chassis_link）和 `Chassis_Update`（四种模式、掉线锁定、斜坡、坐标变换、逆运动学；轮型只体现在两个参数上），ARM 编译无警告、主机模型测试通过，没上板。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`）。2026-11-02 用户把 Infantry.h 改名为 Infantry_Chassis.h；2026-11-03 chassis_link 搬到 Shared/Link、两个类型移进 chassis_link.h（和云台板共用），代码没改 |
 
 ## 7. Shared 的用法与改动记录
@@ -125,3 +137,4 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-10-29 | Attitude 加 `Attitude_InitFromAcc()`：没有磁力计时用静止时的加速度平均值初始化 roll / pitch（yaw = 0），算法和 `Attitude_InitializeQuaternion` 前半段相同；原有函数未改 | Gimbal_test 清理编译无警告；主机测试（真 Attitude.c）初始化后 pitch 与真值一致；未上板 |
 | 2026-11-03 | 新增 `Shared/Link/chassis_link.c/.h`：从 Chassis_test/App 原样搬来，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，加了 `ChassisLink_SendCmd` 的声明（函数体用户写）。两个工程的 CMake 都加了它和 include 目录 `Shared/Link` | 两个工程清理编译无警告，烧进 Flash 的内容和改之前逐字节相同（Gimbal_test FLASH 36568 B / RAM 3376 B，Chassis_test 20876 B / 2952 B）；云台工程还没调用，chassis_link 整个被链接器裁掉 |
 | 2026-11-03 | `Shared/Link/chassis_link.c` 加云台板发送：`ChassisLink_SendCmd` + `ChassisLink_BuildFrame`（用户写第一版）、`ChassisLink_WriteS16`；按审查改了 vx 高字节、`(int8_t)` → `(uint8_t)`、限幅后 `roundf`、删两个 `sys/` 头文件。接收部分没动 | 两个工程清理编译无警告（Gimbal_test FLASH 37112 B / RAM 3384 B；Chassis_test 不调发送，固件和改之前逐字节相同）；主机测试：往返 9 组、饱和、NULL 都对；未上板 |
+| 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。两个工程都没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）；rs05.c 在云台工程的编译环境下单独编译无警告；主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
