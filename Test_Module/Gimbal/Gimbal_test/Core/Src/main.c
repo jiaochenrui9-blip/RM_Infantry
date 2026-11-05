@@ -21,6 +21,7 @@
 #include "can.h"
 #include "dma.h"
 #include "spi.h"
+#include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -93,6 +94,7 @@ int main(void)
   MX_CAN1_Init();
   MX_CAN2_Init();
   MX_SPI1_Init();
+  MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
   Robot_Init();
   /* USER CODE END 2 */

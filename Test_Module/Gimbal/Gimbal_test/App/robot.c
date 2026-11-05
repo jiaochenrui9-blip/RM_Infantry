@@ -11,6 +11,7 @@
 #include "gimbal.h"
 #include "gimbal_test_cmd.h"
 #include "ins.h"
+#include "tim.h"
 
 /* 每路 CAN 只能有一个 manager，这路上的所有电机都注册进来（见根目录 notes.md 第 2 节）。 */
 static DJI_MotorManager_t robot_can1;
@@ -32,9 +33,9 @@ void Robot_Init(void)
         Error_Handler();
     }
 
-    /* IMU：这里只初始化 BMI088（约 85 ms），零偏和初始姿态在上电后约 1 s 内标定，期间整车别动。
-       失败只影响 IMU 模式，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
-    (void)INS_Init(&hspi1);
+    /* IMU：这里初始化 BMI088（约 85 ms）、启动加热 PWM。上电后先升温（要接 24 V），到温后约 5 s 标定零偏和初始姿态，
+       标定期间整车别动。失败只影响 IMU 模式，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
+    (void)INS_Init(&hspi1, &htim10);
 
     if ((DJI_MotorManager_Start(&robot_can1) != HAL_OK) ||
         (DJI_MotorManager_Start(&robot_can2) != HAL_OK))

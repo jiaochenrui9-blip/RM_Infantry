@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-11-04（云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020，CMake 编了 rs05.c 但没有调用。同日查了 RS05 的零点：编码器量的是转子，上电后的角度可能差整数个 46.45°，中值能不能写死待测。第 2、4、5、6、7 节有改动）
+> 最后更新：2026-11-05（IMU 加热恒温代码改好、待上板，见第 6、8 节）。2026-11-04（IMU 加热恒温开工：查到加热电源只来自 24 V，记在第 5 节。同日早些时候：盘点了还没做的，见第 8 节；第 4 节加了发射机构要和云台电机分路。同日早些时候：云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020，CMake 编了 rs05.c 但没有调用。同日查了 RS05 的零点：编码器量的是转子，上电后的角度可能差整数个 46.45°，中值能不能写死待测。第 2、4、5、6、7 节有改动）
 
 ## 1. 项目组织
 
@@ -75,6 +75,7 @@ RM_Infantry/
   - 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110 和发给 RS05 的所有指令都优先。`AutoRetransmission = DISABLE` 时，C 板的帧和应答同时起步就会输掉仲裁、直接丢，所以换的那一路要在 .ioc 里打开自动重发。
   - 过滤器用 CAN1 组 1、CAN2 组 15（can_bus.h 预留的），只收类型 2。
   - F4 每路只有 3 个发送邮箱，RS05 每个电机每周期占一个。两个 RS05 加 0x110 正好 3 个，这一路上别再加别的周期帧。
+- 发射机构（还没写；按两个 M3508 摩擦轮 + 一个 M2006 拨弹盘算：0x200 + 3 帧反馈 = 4 帧标准帧/ms，约 44%~54%）要和云台电机分在两路：和两个 GM6020 加 0x110 放同一路约 89%~108%，和两个 RS05 放同一路约 97%~118%。云台用 GM6020、或者 RS05 留在 CAN1 时，发射机构放云台板 CAN2；RS05 挪到 CAN2 时，发射机构放 CAN1（加 0x110 约 56%~68%）。2026-11-04 盘点时按上面的帧长算的。
 
 ## 5. C 板硬件事实（已对照用户手册 IO 表和原理图）
 
@@ -84,7 +85,7 @@ RM_Infantry/
 | CAN2（4-pin 口） | PB5 RX / PB6 TX | 插座线序 1 5V、2 GND、3 CANH、4 CANL；两个插座 |
 | DBUS 遥控 | USART3_RX PC11 | 板上已反相，手册写 100 kbps |
 | BMI088 | SPI1：PB3 SCK / PA7 MOSI / PB4 MISO；CS：加速度计 PA4、陀螺仪 PB0；INT1：加速度计 PC4、陀螺仪 PC5 | SPI 最高 10 MHz |
-| IMU 加热 | TIM10_CH1 PF6 | 手册建议比板子正常工作温度高 15~20 ℃ |
+| IMU 加热 | TIM10_CH1 PF6 | 手册建议比板子正常工作温度高 15~20 ℃。高电平加热，满功率 0.58 W。加热电源来自 VCC_5V_M，只由 24 V 降压得到：只接调试器或只插 USB 时不会加热（2026-11-04 查原理图） |
 | IST8310 | I2C3：PA8 SCL / PC9 SDA；RSTN PG6、DRDY PG3 | 地址 0x0E |
 | RGB LED | PH10 蓝 / PH11 绿 / PH12 红 | 高电平亮 |
 | 用户按键 | PA0 | |
@@ -110,7 +111,7 @@ RM_Infantry/
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
-| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」。2026-11-04：云台电机可能换成 RS05。驱动已写好，放在 `Shared/Devices/RS05`（在 `C:\Clion\RS05` 里测，还没上板）；云台工程还是 GM6020，换的步骤见其 notes.md「换 RS05」；RS05 编码器量的是转子，中值能不能写死要先上板测，见其「中值（零点）」 |
+| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」。2026-11-04：云台电机可能换成 RS05。驱动已写好，放在 `Shared/Devices/RS05`（在 `C:\Clion\RS05` 里测，还没上板）；云台工程还是 GM6020，换的步骤见其 notes.md「换 RS05」；RS05 编码器量的是转子，中值能不能写死要先上板测，见其「中值（零点）」。v2 第 3 步 IMU 加热恒温：2026-11-04 定接口、.ioc 配 TIM10_CH1（PF6），11-05 用户第一版审查后 Claude 改好，ARM 编译无警告、主机模型里符合预期，还没上板（要接 24 V），见其「第 3 步进度」 |
 | 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。2026-11-01 用户开始写（Infantry.h / Infantry_Chassis.c，速度环用电机层自带的），按用户要求 Claude 写好了初始化、板间指令接收（chassis_link）和 `Chassis_Update`（四种模式、掉线锁定、斜坡、坐标变换、逆运动学；轮型只体现在两个参数上），ARM 编译无警告、主机模型测试通过，没上板。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`）。2026-11-02 用户把 Infantry.h 改名为 Infantry_Chassis.h；2026-11-03 chassis_link 搬到 Shared/Link、两个类型移进 chassis_link.h（和云台板共用），代码没改 |
 
 ## 7. Shared 的用法与改动记录
@@ -138,3 +139,22 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-11-03 | 新增 `Shared/Link/chassis_link.c/.h`：从 Chassis_test/App 原样搬来，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，加了 `ChassisLink_SendCmd` 的声明（函数体用户写）。两个工程的 CMake 都加了它和 include 目录 `Shared/Link` | 两个工程清理编译无警告，烧进 Flash 的内容和改之前逐字节相同（Gimbal_test FLASH 36568 B / RAM 3376 B，Chassis_test 20876 B / 2952 B）；云台工程还没调用，chassis_link 整个被链接器裁掉 |
 | 2026-11-03 | `Shared/Link/chassis_link.c` 加云台板发送：`ChassisLink_SendCmd` + `ChassisLink_BuildFrame`（用户写第一版）、`ChassisLink_WriteS16`；按审查改了 vx 高字节、`(int8_t)` → `(uint8_t)`、限幅后 `roundf`、删两个 `sys/` 头文件。接收部分没动 | 两个工程清理编译无警告（Gimbal_test FLASH 37112 B / RAM 3384 B；Chassis_test 不调发送，固件和改之前逐字节相同）；主机测试：往返 9 组、饱和、NULL 都对；未上板 |
 | 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。同日用户想在 CLion 里看到它，Gimbal_test 的 CMake 加了 rs05.c 和 include 目录，还没有代码调用；Chassis_test 没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）。Gimbal_test 加进 CMake 后，烧进 Flash 的内容和加之前逐字节相同，ELF 里没有 RS05 的符号（整个被链接器裁掉）。主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
+
+## 8. 还没做的（2026-11-04 盘点：机械没好，暂时上不了车）
+
+按离车能不能验分组。离车能验的先做：现在除了 ins 在桌上验过，云台控制、底盘、板间通信、RS05 驱动都只在主机上测过，再多写只能主机测的代码，上车时问题会叠在一起。
+
+1. 已经写好、离车就能验（不写新代码）：
+   - RS05 单电机上板，重点是第 7 步上电绝对角（`C:\Clion\RS05\notes.md`）。要 RS05、24 V；第 0 步设 ID 要上位机 + USB-CAN。结论决定 yaw 能不能用 RS05（第 5 节）。
+   - 两板通信验收（Gimbal_test/notes.md「板间通信」验收 1~3）。要两块 C 板，都要有 5 V（接 24 V 或插 USB）。
+   - C 板轴向对应实物的哪条边（ins 第 1 步留下的，Gimbal_test/notes.md 标定记录）。只要 C 板。
+   - 云台（或 yaw）留 GM6020、手上有电机的话：桌上先查固件版本、打开电流环（Gimbal_test 已知问题第 4 条）。
+2. 要新写、离车能写完也能验完：
+   - USB 虚拟串口 + VOFA+ 波形。只要 C 板。.ioc 配 USB_OTG_FS（Device_Only）+ USB_DEVICE 的 CDC，PLLQ 改 7（第 5 节）。上车调 PID 用，下面两项调试也能用。
+   - 遥控器 DR16 + robot_cmd。要 DR16 接收机和遥控器。.ioc 配 USART3（RX 在 PC11），串口参数以 DR16 手册为准（硬件资料里还没有）。robot_cmd 取代 gimbal_test_cmd，遥控掉线全车无力；底盘落地跑之前要有它（调试器暂停后 C620 怎么处理手册没写，见 Chassis_test/notes.md 容易错的第 10 条）。
+   - IMU 加热恒温（云台 v2 第 3 步，做法见 Gimbal_test/notes.md「第 3 步」）。只要 C 板，但要接 24 V（加热电源只来自 24 V，第 5 节）。2026-11-04 开始：.ioc 已配 TIM10_CH1（PF6）并生成，接口已定。用户第一版 11-05 审查出 12 处要改，用户让 Claude 改好：ARM 清理编译无警告，主机模型里符合预期，**还没上板**（Gimbal_test/notes.md「第 3 步进度」）。第一版在 `Shared/Algorithm/user_math` 加的 `Math_GetAbs` 已撤回（改用 fabsf），Shared 没有净改动。
+   - 三项都要改 Gimbal_test 的 .ioc 和 robot.c，一次做一项。
+3. 能写、离车只能主机测：发射机构（摩擦轮 + 拨弹盘）。要等机械定电机、拨盘格数；放哪路 CAN 见第 4 节最后一条。
+4. 以后：裁判系统（底盘功率控制、枪口热量控制都要它的数据）、底盘 → 云台回传帧、超级电容、视觉通信、云台换 RS05（等第 1 组第一项的结论）、单板 / 双板定了以后的合并工程。
+
+还没定、会卡住后面的：云台电机（GM6020 / RS05，或 pitch、yaw 各用一种）；单板 / 双板；底盘轮型；发射机构用什么电机。

@@ -53,11 +53,16 @@ typedef struct
 extern CAN_HandleTypeDef hcan1;
 extern CAN_HandleTypeDef hcan2;
 
-/* ins.h 的函数声明里用到，主机测试不编译 ins.c */
+/* ins.h 的函数声明里用到（BMI088 的 SPI、加热 PWM 的定时器），主机测试不编译 ins.c */
 typedef struct
 {
     uint32_t dummy;
 } SPI_HandleTypeDef;
+
+typedef struct
+{
+    uint32_t dummy;
+} TIM_HandleTypeDef;
 
 /* 仿真时间，由 sim/gimbal_sim.c 提供：每跑一个控制周期加 1 */
 uint32_t HAL_GetTick(void);
