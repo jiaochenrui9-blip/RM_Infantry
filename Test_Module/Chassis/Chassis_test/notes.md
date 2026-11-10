@@ -1,7 +1,7 @@
 # Chassis_test 笔记（底盘测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；云台那边踩过的坑见 `Test_Module/Gimbal/Gimbal_test/notes.md` 的「已知问题」，大部分底盘也适用。
-> 最后更新：2026-11-03（chassis_link 搬到 Shared/Link，`ChassisMode_e`、`ChassisCmd_t` 移进 chassis_link.h，和云台板共用一份；代码没改，固件逐字节相同。云台板的发送同日写好、主机测试通过，见 Gimbal_test/notes.md「板间通信」）
+> 最后更新：2026-11-09（加了并列工程 `F405_Project`，给队友打的 F405 板用。App 先原样复制过去，同日后来那边换成了 M2006 上板测试；本工程没动，见「当前状态」最后一条）。2026-11-03（chassis_link 搬到 Shared/Link，`ChassisMode_e`、`ChassisCmd_t` 移进 chassis_link.h，和云台板共用一份；代码没改，固件逐字节相同。云台板的发送同日写好、主机测试通过，见 Gimbal_test/notes.md「板间通信」）
 
 ## 当前状态
 
@@ -16,6 +16,7 @@
 - 2026-11-03 为了让云台板用同一份帧格式和类型（用户选的）：`chassis_link.c/.h` 从 App 原样搬到 `Shared/Link`，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h（Infantry_Chassis.h 改成 include 它），CMake 改路径。代码没改：清理编译无警告，FLASH 20876 B、RAM 2952 B，烧进 Flash 的内容和搬之前逐字节相同。云台板的发送同日写好（用户写第一版、Claude 按审查改好），主机上和这边的解包对过，两板联调待做，见 Gimbal_test/notes.md「板间通信」。
 - 2026-11-03 整车主机仿真放进仓库：`Test_Module/CarSim`，云台板 + 底盘板的真代码（含本工程的 Infantry_Chassis.c、Shared/Link）编在一起，接 4 个 M3508 麦轮刚体底盘 + 云台模型，12 个场景（RELAX、不跟随直走 / 横移、跟随、边走边转、小陀螺、超速等比例缩小、编码器模式下跟随降级、板间断线、轮子掉线锁定、模式切换）全部通过。**改了底盘代码就跑一遍**，用法见其 README。以前 notes 里记的主机测试是临时目录里的，以它为准。
 - 第 1、2 步的代码都有了（第 3 步只差云台板的发送）。下一步：电机到了按「上板步骤」标方向、调速度环；轮型定了改 `CHASSIS_XY_FACTOR`、`CHASSIS_ROTATE_RADIUS_M`。
+- 2026-11-09 底盘主控要用队友打的 F405 板，建了并列工程 `RM_Infantry/F405_Project`。App 五个文件从本工程原样复制，只有 .ioc 和 Core 按那块板改：CAN1 PB8/PB9、CAN2 PB12/PB13，两个 CAN 收发器的 STB 由 MCU 拉低。本工程没动。同日后来那边去掉了底盘逻辑，换成单个 M2006 的速度环上板测试（现在在 CAN2 上），底盘代码现在只在本工程。那边恢复成底盘程序时，从这里拷最新的 App 过去（方法见其 notes.md）。恢复以后两边都改了要手动同步；CarSim 编的是本工程的 App，那边改了也要同步回来。
 
 ## 工程是怎么建的（以后改外设照这个做）
 
