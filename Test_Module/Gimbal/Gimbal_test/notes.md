@@ -13,6 +13,7 @@
 - 2026-11-01 用户把 yaw 软限位改成 ±180（不限位）。
 - 板间通信（双板，云台板每 1 ms 给底盘板发底盘指令）：2026-11-03 定了接口，见「板间通信」一节。`chassis_link.c/.h` 已从 Chassis_test 搬到 `Shared/Link`（两块板共用一份），本工程 CMake 已加；同日用户写了第一版（`ChassisLink_SendCmd`、gimbal_test、robot.c），审查发现 vx 的高字节写错（1 m/s 收成 0.488、−0.5 收成 +0.012）、联锁看的是指令模式而不是实际模式；用户让 Claude 按审查改好：ARM 清理编译无警告（FLASH 37112 B、RAM 3384 B），主机往返、联锁测试全过；**还没上板**，见「板间通信」的「第一版审查」。
 - 2026-11-04：云台电机可能从 GM6020 换成灵足 RS05。用户让先把旧 RS05 工程（`C:\Clion\RS05`）按云台需要改好、驱动搬进 `Shared/Devices/RS05`，**本工程先不动，还是 GM6020**。同日用户想在 CLion 里看到它，CMake 加了 rs05.c 和 include 目录，没有代码调用，固件和加之前逐字节相同。换的时候按「换 RS05」改。
+- 遥控器（DR16 + robot_cmd，取代调试器用的 gimbal_test_cmd）：2026-11-04 定了接口，见「遥控器：DR16 + robot_cmd」一节；用户写第一版。.ioc 的 USART3 等 IMU 加热、USB 两项提交后由 Claude 改。DR16 手册还没放进 `硬件资料/`。
 
 ## 已知问题 / 坑
 
@@ -73,7 +74,7 @@ gimbal.c 内部每个轴一个 `GimbalAxis_t`（9 个字段）：电机、中值
 
 - **v1 编码器定角度**：代码已完成，待上板标定和调参。
 - **v2 IMU 定角度**：接口已定（见下一节），分三步：ins（已完成，桌面验收通过）→ 云台 IMU 模式（代码 10-31 改好、主机模型测试通过；上板验收要等 v1 调通、C 板装到云台）→ 加热恒温（2026-11-04 定接口、.ioc 已配；用户第一版 11-05 审查后由 Claude 改好，主机模型里符合预期，待上板验收，要接 24 V）。
-- **v3 遥控器**：DR16 接 USART3（PC11），手册写 100 kbps；其余串口参数本目录没有 DR16 手册，用前核对。
+- **v3 遥控器**：2026-11-04 定接口（DR16 驱动 + robot_cmd，见「遥控器：DR16 + robot_cmd」），用户写第一版。
 - **板间通信（双板）**：2026-11-03 定了云台板发底盘指令的接口（见「板间通信」），用户写；两块 C 板就能验收，不用电机。
 - **合并准备**：定单板 / 双板；按根目录 notes.md 的 CAN 表分配负载。
 
@@ -534,9 +535,196 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 - 改正后的验证：ARM 清理编译无警告（Gimbal_test FLASH 37112 B、RAM 3384 B；Chassis_test 的固件和改之前逐字节相同）；chassis_link.c 加 `-Wextra -Wconversion` 也没有警告；主机测试（同上，不再需要给 `_intsup.h` 放空文件）：往返 9 组全对（2.10° 收成 2.10），验收值 vx −1.234、vy 0.567 收到原值，超范围饱和在 ±32.767 m/s、±327.67°、不翻符号，NULL 返回 HAL_ERROR；联锁 7 项全过（指令 IMU、实际 RELAX 时 FOLLOW / SPIN 发 1，云台进了 IMU 后 FOLLOW 自动恢复，`gimbal_test.chassis_mode` 不被改）。
 - 下一步：按上面验收的第 1~3 条在两块 C 板上测。
 
-## 换 RS05（2026-11-04 定方案，还没换）
+## 遥控器：DR16 + robot_cmd（2026-11-04 定接口，用户写第一版）
+
+上车后底盘落地跑之前，要有遥控器随时让全车无力。robot_cmd 取代调试器用的 gimbal_test_cmd，把遥控器（以后还有键鼠）转成 `GimbalCmd_t` 和发给底盘板的 `ChassisCmd_t`。DR16 驱动放 `Shared/Devices/DR16`，robot_cmd 放 `App/robot_cmd`。键鼠这一版不做：键鼠数据从 DR16 来还是从图传链路来，要看用的图传和当年规则，确认后再加。
+
+用户 11-04 定的：左摇杆走、右摇杆瞄；右拨杆管云台（下 = 全车无力）、左拨杆管底盘；robot.c 只调 robot_cmd，gimbal_test_cmd 留着；右拨杆在上、IMU 还没好时先发编码器模式；.ioc 由 Claude 用 CubeMX 命令行改。
+
+### 硬件和 .ioc
+
+- DBUS 口和 PWM 口共用一个 24-pin 排针（C 板手册第 12~13 页）：C8 = DBUS 信号，B8 = 5 V，A8 = GND。信号经三极管 PMBT3904 反相后接 UART3_RX（PC11），STM32 按普通串口收。
+- **接收机的 5 V 只有接 24 V 才有**：B 排是 VCC_5V_M（24 V 经 TPS54540 降压），手册原话“USB 供电只供给电源网络 VCC_5V，不支持由电源网络 VCC_5V_M 供电的板载外设，例如 PWM 外设接口”。只插 USB、只接调试器时接收机不上电。
+- PC10（USART3_TX）：原理图里 UART3_TX 只出现在 MCU 引脚旁，没找到接到别处，.ioc 里让 USART3 占着它没关系。
+- .ioc（Claude 用 CubeMX 命令行改，等 IMU 加热、USB 虚拟串口两项的 .ioc 改动提交后叠在上面）：USART3 Asynchronous，引脚选 PC11 RX / PC10 TX；100000 bps，Word Length 9 Bits（含校验位）、Parity Even、Stop Bits 1，Data Direction Receive Only；USART3_RX 用 DMA1 Stream1（通道 4），外设到内存、Normal、字节宽度；打开 USART3 全局中断（空闲中断靠它），抢占优先级 5（和 SPI1、DMA 一样；CAN 是 0）。生成 `usart.c/.h`（`huart3`），main.c 多一行 `MX_USART3_UART_Init()`。
+- 帧格式（DR16 手册 `硬件资料/` 里还没有，下面是照大疆例程记的，手册到了核对）：8 位数据、偶校验、1 位停止；每帧 18 字节，帧间隔约 14 ms（以手册为准）。各字段从第 0 字节的最低位起连续排，低位在前：
+
+| 位 | 内容 | 值 |
+|---|---|---|
+| 0~10 | ch0（例程：右摇杆左右） | 364~1684，中值 1024 |
+| 11~21 | ch1（例程：右摇杆上下） | 同上 |
+| 22~32 | ch2（例程：左摇杆左右） | 同上 |
+| 33~43 | ch3（例程：左摇杆上下） | 同上 |
+| 44~45 | 拨杆 sw[0]（大疆步兵例程当右拨杆用） | 1 上、3 中、2 下 |
+| 46~47 | 拨杆 sw[1]（左拨杆） | 同上 |
+| 48~127 | 鼠标 x / y / z（int16）、左右键、键盘 | 这一版不解 |
+| 128~143 | 保留（新固件是拨轮） | 不解 |
+
+哪个通道是哪个摇杆、推哪边变大、哪个拨杆在左，网上资料说法不一，按桌面验收第 2 条实测，`robot_cmd_config.h` 里的下标跟着改。
+
+### 数据流
+
+DR16 →（DMA + 空闲中断）→ dr16（中断里解码、检查，存最新一帧）→ robot.c `DR16_GetData` → robot_cmd（加上 ins 的 valid、云台反馈）→ `GimbalCmd_t` → `Gimbal_SetCmd`；`ChassisCmd_t` → `ChassisLink_SendCmd` → 0x110 → 底盘板。
+
+`Robot_Loop()` 每 1 ms：`INS_Update` → `INS_GetFeedback` → `Gimbal_SetImu` → `Gimbal_GetFeedback` → `DR16_GetData` → `RobotCmd_Update` → `Gimbal_SetCmd` → `Gimbal_Update` → 每路 CAN `SendAll` → `ChassisLink_SendCmd`。
+
+### DR16 驱动（Shared/Devices/DR16/dr16.h、dr16.c）
+
+```c
+/* dr16.h */
+#include "main.h"
+
+#define DR16_CH_MAX         660     /* 摇杆偏离中值最大 660（原值 364~1684，中值 1024） */
+#define DR16_TIMEOUT_MS     100U    /* 超过这么久没收到合法帧算掉线（约 7 帧） */
+
+typedef enum
+{
+    DR16_SW_UP = 1,
+    DR16_SW_DOWN = 2,
+    DR16_SW_MID = 3
+} DR16_Switch_e;                    /* 数值就是帧里的原值 */
+
+typedef struct
+{
+    uint8_t online;                 /* 最近 DR16_TIMEOUT_MS 内收到过合法帧；上电后还没收到过时为 0 */
+    int16_t ch[4];                  /* 摇杆，减过中值：-660~660 */
+    DR16_Switch_e sw[2];            /* 两个拨杆 */
+} DR16_Data_t;
+
+/* 记下 huart，开始接收（DMA + 空闲中断）。返回 HAL_UARTEx_ReceiveToIdle_DMA 的结果。 */
+HAL_StatusTypeDef DR16_Init(UART_HandleTypeDef *huart);
+/* robot.c 的 HAL_UARTEx_RxEventCallback 里调：收到完整一帧就解码、检查、存下，再重新启动接收。 */
+void DR16_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size);
+/* robot.c 的 HAL_UART_ErrorCallback 里调：HAL 出错时已经停了接收，这里重新启动。 */
+void DR16_ErrorCallback(UART_HandleTypeDef *huart);
+/* 主循环每 1 ms 调：关中断拷一份最新一帧，按 now_tick 算 online。 */
+void DR16_GetData(uint32_t now_tick, DR16_Data_t *data);
+```
+
+dr16.c：
+
+- static：huart（Init 时存；两个回调先比是不是它，以后别的串口的回调也走 robot.c 的同一个函数）；DMA 缓冲区 36 字节（两帧长）；最新的合法帧（`DR16_Data_t`，其中 online 不用）；收到它时的 tick；收到过没有。
+- 启动接收：`HAL_UARTEx_ReceiveToIdle_DMA(huart, 缓冲区, 36)`，Init 和两个回调都调它。
+- `DR16_RxEventCallback`：事件类型是空闲（`HAL_UARTEx_GetRxEventType(huart) == HAL_UART_RXEVENT_IDLE`）并且 size == 18，才解码 → 检查 → 合法就存下、记 tick（`HAL_GetTick()`）、置“收到过”。之后除了半满事件（HT），都重新启动接收。
+- 解码：按上表取 4 个通道、2 个拨杆，通道减 1024。
+- 检查（大疆例程的做法）：4 个通道减完都在 ±700 以内，两个拨杆都是 1~3；有一项不对整帧丢掉，不存、不记 tick。
+- `DR16_GetData`：关中断（`__get_PRIMASK` / `__disable_irq` / `__set_PRIMASK`，同 chassis_link）拷最新帧、tick、收到过；online = 收到过 && `(int32_t)(now_tick − tick) <= DR16_TIMEOUT_MS`。
+
+### robot_cmd（App/robot_cmd/robot_cmd.h、robot_cmd.c、robot_cmd_config.h）
+
+```c
+/* robot_cmd.h */
+#include "gimbal.h"         /* GimbalCmd_t、GimbalFeedback_t */
+#include "chassis_link.h"   /* ChassisCmd_t */
+#include "dr16.h"           /* DR16_Data_t */
+#include "ins.h"            /* InsFeedback_t，只看 valid */
+
+/* 指令层：遥控器 → 云台指令、底盘指令（底盘指令经板间 CAN 发给底盘板）。以后键鼠、视觉也加在这里。
+   每 1 ms 在 Gimbal_GetFeedback、DR16_GetData 之后，Gimbal_SetCmd 之前调。没有 Init：内部状态初值为 0。 */
+void RobotCmd_Update(uint32_t now_tick, const DR16_Data_t *rc, const InsFeedback_t *imu,
+                     const GimbalFeedback_t *feedback, GimbalCmd_t *gimbal_cmd, ChassisCmd_t *chassis_cmd);
+```
+
+```c
+/* robot_cmd_config.h */
+/* 通道、拨杆的下标：先照大疆例程填，桌面验收第 2 条实测后改这里 */
+#define ROBOT_CMD_CH_VX             3       /* 左摇杆上下：推上 = 前进 */
+#define ROBOT_CMD_CH_VY             2       /* 左摇杆左右：推右 = 往右（vy 为负） */
+#define ROBOT_CMD_CH_YAW            0       /* 右摇杆左右：推右 = 往右转（yaw 减小） */
+#define ROBOT_CMD_CH_PITCH          1       /* 右摇杆上下：推上 = 抬头 */
+#define ROBOT_CMD_SW_GIMBAL         0       /* 右拨杆：下 全车无力 / 中 编码器 / 上 IMU */
+#define ROBOT_CMD_SW_CHASSIS        1       /* 左拨杆：下 不跟随 / 中 跟随 / 上 小陀螺 */
+
+/* 上电后先发这么久 RELAX：两块板的电机都有反馈了再给闭环 / 运动模式，不然会被锁住 */
+#define ROBOT_CMD_STARTUP_MS        2000U
+/* 摇杆死区（原值，满量程 660）：松手后不一定正好回中 */
+#define ROBOT_CMD_DEADBAND          10
+/* 摇杆推满时：底盘速度（m/s，先给小）；云台目标角每秒变多少（°/s，云台斜坡 100°/s，超过它也走不快）。
+   方向反了把对应的值写成负数 */
+#define ROBOT_CMD_VX_MAX_MPS        1.0f
+#define ROBOT_CMD_VY_MAX_MPS        1.0f
+#define ROBOT_CMD_YAW_MAX_DPS       90.0f
+#define ROBOT_CMD_PITCH_MAX_DPS     60.0f
+/* 目标最多领先实际角多少度；超过以后摇杆再往那边推，目标不再加 */
+#define ROBOT_CMD_LEAD_MAX_DEG      10.0f
+```
+
+robot_cmd.c 内部 static 只要三个：上一周期发出去的云台模式、yaw 目标、pitch 目标（坐标系跟着模式走，和 `GimbalCmd_t` 一样）。`RobotCmd_Update` 按这个顺序：
+
+1. 定模式。掉线（`rc->online` 为 0），或者上电不到 `ROBOT_CMD_STARTUP_MS`（直接和 `now_tick` 比）→ 云台、底盘都 RELAX。否则按下面两张表。右拨杆在中时，跟随、小陀螺会被第 4 步的联锁降成不跟随。
+
+| 右拨杆 | 云台 | 底盘 |
+|---|---|---|
+| 下 | RELAX | RELAX（全车无力） |
+| 中 | ENCODER | 看左拨杆 |
+| 上 | IMU；`imu->valid` 为 0 时 ENCODER | 看左拨杆 |
+
+| 左拨杆 | 底盘 |
+|---|---|
+| 下 | NO_FOLLOW |
+| 中 | FOLLOW |
+| 上 | SPIN |
+
+2. 发出去的云台模式和上一周期不同 → 两个目标同步成新模式下的当前角：IMU 用 `feedback->yaw_imu_deg` / `pitch_imu_deg`，其他用 `yaw_rel_deg` / `pitch_rel_deg`（和 gimbal_test_cmd 一样）。
+3. 云台不是 RELAX 时，摇杆累加到目标：过了死区才算，角速度 = 摇杆 / 660 × 最大角速度（yaw 取负：推右往右转），每周期加 角速度 × 0.001。领先量 = `Math_WrapDeg180(目标 − 本模式的当前角)`：角速度为正且领先量已经 ≥ `ROBOT_CMD_LEAD_MAX_DEG`，或者角速度为负且领先量 ≤ −它，这一周期不加。加完 `Math_WrapDeg180`。两个轴一样，写成一个函数调两次。
+4. 底盘：vx = 摇杆 / 660 × `ROBOT_CMD_VX_MAX_MPS`，vy 取负（推右是往右，y 朝左为正），都过了死区才算；跟随、小陀螺在云台**实际**模式（`feedback->mode`）不是 IMU 时降成 NO_FOLLOW（和 gimbal_test_cmd 一样）；`gimbal_yaw_rel_deg` 填 `feedback->yaw_rel_deg`。
+
+### robot.c、CMake
+
+- robot.c（用户写）：`#include "usart.h"`、`"dr16.h"`、`"robot_cmd.h"`，去掉 `"gimbal_test_cmd.h"`；`Robot_Init` 里 `DR16_Init(&huart3)`，失败进 `Error_Handler()`；`Robot_Loop` 第 1 步改成 `Gimbal_GetFeedback(&feedback)` → `DR16_GetData(now, &rc)` → `RobotCmd_Update(now, &rc, &imu, &feedback, &gimbal_cmd, &chassis_cmd)` → `Gimbal_SetCmd(&gimbal_cmd)`；加 `HAL_UARTEx_RxEventCallback(huart, Size)` 转给 `DR16_RxEventCallback`，`HAL_UART_ErrorCallback(huart)` 转给 `DR16_ErrorCallback`。
+- 顶层 CMakeLists.txt（Claude，文件建好后加）：`App/robot_cmd/robot_cmd.c`、`${SHARED_DIR}/Devices/DR16/dr16.c`，include 目录 `App/robot_cmd`、`${SHARED_DIR}/Devices/DR16`。`gimbal_test_cmd.c` 照编（没人调用，链接时被裁掉）。要方波调参时，在 robot.c 里把 `RobotCmd_Update` 那行换回 `GimbalTestCmd_Update`；这时遥控器管不了车，底盘别落地。
+
+### 为什么这样写
+
+- 掉线判断在驱动，“掉线 → 全车无力”在 robot_cmd：驱动只报数据新不新，怎么处理是指令层的事。chassis_link 超时直接给 RELAX，是因为它的数据本身就是指令；DR16 的全 0 不是合法数据，驱动不替上层定“安全值”。
+- 掉线恢复后直接按拨杆位置恢复，不要求先拨到下：比赛中遥控偶尔断一下，不该要操作手重新解锁。云台、底盘被锁住时，照旧要拨一次下（RELAX）。
+- 右拨杆下 = 全车无力：一个动作停全车；全车 RELAX 也是解除云台、底盘锁定的办法。
+- IMU 没好时先发编码器模式（用户 11-04 选的）：加热恒温以后，上电约 1 分钟 IMU 才 valid（见「第 3 步」）。照原来的做法，右拨杆在上就会被锁成无力，也不好判断 IMU 什么时候好。降成编码器模式时，跟随、小陀螺被联锁降成不跟随；IMU 好了自动切过去，目标同步、不跳。运行中 IMU 失效也在同一周期退到编码器模式（robot.c 里 `Gimbal_SetImu` 和 `RobotCmd_Update` 用的是同一份 ins 数据），云台的“IMU 失效锁定”只在指令源仍要 IMU 时才会触发。
+- 上电 2 s RELAX：底盘、云台在电机还没反馈时收到运动 / 闭环模式会锁住（「板间通信」容易错的第 6 条、已知问题第 7 条）。两块板同时上电，2 s 够电机报到；IMU 不靠这个等，见上一条。用 `now_tick` 判，不另存变量。
+- 摇杆给角速度，目标在 robot_cmd 里累加：`GimbalCmd_t` 是角度，以后视觉也给角度；松手云台停在当前目标。斜坡、加速度限制云台和底盘模块里都有，robot_cmd 不再加。
+- 领先量限制代替限位：robot_cmd 不知道云台限位（`gimbal_config.h` 只给 gimbal.c 用），IMU 模式下限位在对地坐标系里还随底盘倾斜变；看领先量就不用知道限位。不加这个，顶在限位上推住摇杆 2 s，目标会跑出去 120°，反推要等 2 s 才有反应。只停止累加、不把目标往实际角拉：被手扶住、被打偏时目标不跟着跑（云台第一版的 hold_release 问题）。
+- 解码放在中断里：检查要先解码；18 字节解码只是几十条移位指令，主循环只拷结构体。
+- DMA 用 Normal、每帧重启：空闲中断自动对齐帧头，上电时从一帧中间开始收也只丢这一帧；Circular 要自己算环形缓冲区里的位置。
+- gimbal_test_cmd 留着：HostTest、CarSim 的 28 个场景都用它给精确的角度、速度，调参的方波也在它里面。
+
+### 容易错的地方
+
+1. Word Length 选 9 Bits：STM32 的字长包含校验位，选 8 Bits + Even 只剩 7 位数据。
+2. 出错要重启接收：DMA 接收时出任何错（校验、帧、噪声、溢出），HAL 都会停掉接收，再调 `HAL_UART_ErrorCallback`（本工程 HAL 1.8.5 的 `HAL_UART_IRQHandler`）。不在里面重新启动，插拔一次接收机、上电时一个毛刺就再也收不到，看起来就是遥控器掉线、整车无力。
+3. 半满事件：`ReceiveToIdle_DMA` 也开了 DMA 半满中断。缓冲区 36 字节时，第 18 个字节一到就回调一次（类型 HT，size 也是 18），接着空闲再回调一次（类型 IDLE）。只认 IDLE；HT 时别重启（DMA 还在跑，会返回 HAL_BUSY）。
+4. 缓冲区要比一帧长：等于 18 时一帧正好收满，HAL 只回调“传输完成”（类型 TC），空闲那次不回调；按第 3 条只认 IDLE，就一帧也收不到。
+5. 上电还没收到过帧：tick 初值是 0，只按 `now − tick ≤ 100` 算，上电前 100 ms 会判成在线，存的拨杆却是 0（不是合法值）。要单独记“收到过”。
+6. 中断里写、主循环读：关中断整体拷，不然会读到半新半旧的一帧；超时按有符号数比（同 chassis_link）。
+7. 判坏帧的门限留余量：满量程是 660，大疆例程用 ±700。卡在 660 的话，万一哪个遥控器推满读到 661，推满时的帧全被丢掉，100 ms 后整车无力。
+8. 同步看“发出去的”云台模式，不看拨杆：掉线恢复、上电满 2 s、IMU 好了自动切 IMU，这几种情况拨杆都没动，发出去的模式却变了，都要同步，不然云台会转向旧目标。
+9. 4 个通道都要过死区：松手后差几个数，云台目标会慢慢转（2 / 660 × 90°/s ≈ 0.3°/s），底盘会慢慢走。
+10. 领先量先 `Math_WrapDeg180` 再比：yaw 不限位时，目标 179°、实际 −179° 差的是 −2°，不是 358°。
+11. 拨杆从上拨到下会经过中间档，可能有一帧（约 14 ms）是编码器模式；有第 8 条的同步，不会跳。
+
+### 验收（C 板 + DR16 + 遥控器，接 24 V，不用电机）
+
+0. 准备：DR16 手册放进 `硬件资料/`，核对上面的帧格式和串口参数；接收机和遥控器对频（步骤见手册）。DR16 的线插 DBUS 口（C8 信号、B8 5 V、A8 GND，别插反）。
+1. 收帧：遥控器开机，dr16.c 里存最新帧的变量有值，tick 每 14 ms 左右变一次。
+2. 摇杆和拨杆：每个摇杆推到四个方向的头，记哪个通道变、推满读多少（应约 ±660）；松手记回中后的读数（定死区）；每个拨杆拨三档，记哪个 sw 变、读数是不是 1 / 3 / 2。和 `robot_cmd_config.h` 的下标、方向不一样就改宏。
+3. 掉线：关遥控器 → 100 ms 后 online 变 0，gimbal.c 的 `gimbal_cmd.mode` 变 0（RELAX）；开机后恢复，模式按拨杆。
+4. 接收恢复：拔插接收机的线、调试器暂停几秒再继续，之后都能回到在线。
+5. robot_cmd（没电机时云台被锁在 RELAX，看指令就行）：右拨杆中 → `gimbal_cmd.mode` 为 1；上 → IMU 没好时 1，好了（`ins_feedback.valid` 变 1）自动变 2；推右摇杆，robot_cmd 的 yaw 目标往负走，走到比当前角小 10° 停住（领先量限制），松手不动。底盘指令在云台板上是局部变量；有第二块板时，按「板间通信」验收那样接，在底盘板上看 `chassis_cmd`。
+6. ARM 清理编译无警告；HostTest、CarSim 照跑通过，加上 robot_cmd 的场景（Claude 写）。
+
+### 主机测试（Claude 写）
+
+- dr16：假 HAL 的 `HAL_UARTEx_ReceiveToIdle_DMA` 记下驱动给的缓冲区，测试往里填字节、再调回调：已知帧解出来的值；HT 事件不重复处理、不重启；长度不对、超范围、拨杆为 0 的帧丢掉；出错回调重新启动接收；上电还没收到过时 online 为 0；100 ms 超时，有符号比较。
+- robot_cmd：HostTest 的模型里把指令源换成 robot_cmd（给假的 `DR16_Data_t`）：上电 2 s 内 RELAX；拨杆组合 → 模式；IMU 没好 → 编码器，好了自动切 IMU、不跳；掉线 → 全车 RELAX，恢复后不跳；跟随、小陀螺降级；摇杆方向和推满的速度；死区；pitch 顶在限位上推住 2 s，再反推立刻有反应。
+
+#### 进度
+
+- 2026-11-04 定接口（见上）。DR16 手册还没放进来。下一步：用户写 dr16.c/.h、robot_cmd.c/.h、robot_cmd_config.h、robot.c 的第一版；.ioc 等 IMU 加热、USB 两项提交后由 Claude 改，CMake 等文件建好后加。
+
+## 换 RS05（2026-11-04 定方案；2026-11-08 做成了并列工程，本工程没换）
 
 用户 2026-11-03 定的：云台只用电流模式，别的都去掉；两个轴都换；接 CAN1；canTimeout 100 ms；CAN1 打开自动重发。2026-11-04 用户让先只做驱动，本工程不动。
+
+2026-11-08 用户让按这一节写一份 RS05 版、和本工程并列：`Test_Module/Gimbal/Gimbal_test_RS05`（主机测试 `Test_Module/Gimbal/HostTest_RS05`），进度和区别见其 notes.md。本工程还是 GM6020，代码没动。下面这几节是那边照着改的依据，RS05 的注意事项也还记在这里。
 
 现状：驱动 `Shared/Devices/RS05/rs05.c/.h`，和 `C:\Clion\RS05` 里的是同一份（用法、协议、主机测试、单电机上板步骤见 `C:\Clion\RS05\notes.md`）。主机测试 98 项全过，**还没上板**。本工程的 CMake 2026-11-04 已经加了 rs05.c 和 include 目录（用户想在 CLion 里看到），还没有代码调用，链接时整个被裁掉，烧进 Flash 的内容和加之前逐字节相同。
 
@@ -549,7 +737,7 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 | gimbal_config.h | `*_ESC_ID` → `*_CAN_ID`（上位机里设，两个电机要不同）。<br>`*_ECD_OFFSET` → `*_ZERO_RAD`（float，RELAX 下扶到中值，读 `motor.position_rad`；和 GM6020 一样写死，见下面「中值（零点）」）。<br>`GIMBAL_CURRENT_LIMIT` 5000 → 1.0（A，约 0.67 N·m，和 GM6020 的 5000 ≈ 0.68 N·m 差不多）。<br>速度环 PID 占位值按同样力矩换算：GM6020 单位 × 约 0.0002（3/16384 × 0.741 / 0.67），Kp 20 → 0.004；不换的话 1°/s 的误差就给 20 A。<br>`GIMBAL_PITCH_GRAVITY_FF` 单位改成 A |
 | robot.c | 两个 DJI manager 换成一个 `RS05_Manager_t`（CAN1）。<br>Init 顺序：`RS05_Manager_Init` → `Gimbal_Init` → `INS_Init` → `RS05_Manager_Start`。<br>接收回调里把 CAN1 的帧交给 `RS05_Manager_ProcessRxFrame`；第 3 步换成 `RS05_Manager_SendAll`。<br>云台板上没有大疆电机了，DJI manager 删掉，以后加发射机构再加回来 |
 | CMakeLists.txt | `Shared/Devices/RS05/rs05.c` 和 include 目录已经加了（2026-11-04）；换的时候去掉 DJI_Driver 的 6 个 .c 和 include 目录 |
-| Gimbal_test.ioc | CAN1 的 Automatic Retransmission 改成 Enable（.ioc 里是 `CAN1.NART=DISABLE`，生成 `AutoRetransmission = ENABLE`），用 CubeMX 重新生成 |
+| Gimbal_test.ioc | CAN1 的 Automatic Retransmission 改成 Enable（.ioc 里是 `CAN1.NART=ENABLE`，生成 `AutoRetransmission = ENABLE`；以前这里写的 `NART=DISABLE` 是错的，2026-11-08 在 Gimbal_test_RS05 上生成确认过），用 CubeMX 重新生成 |
 | test_cmd、ins、chassis_link | 不动 |
 | HostTest、CarSim（主机测试，2026-11-03 进的仓库） | 现在按 GM6020 模拟：编 DJI 驱动，模型发 0x205 / 0x206 反馈，从 0x1FE 取电流。<br>换了以后改成编 rs05.c；模型按 RS05 应答：每收到一帧指令回一帧类型 2，走使能序列，从写 iq_ref 的帧取电流（约 0.67 N·m/A）。<br>两个假 can_bus 还要补 `CAN_Bus_SendExtData`、`CAN_Bus_ConfigExtIdMask`。电机模型可以照 `C:\Clion\RS05\notes.md` 里主机测试的写法 |
 
@@ -599,7 +787,7 @@ gimbal.c：
 
 ### 上板顺序
 
-1. 先在 `C:\Clion\RS05` 里单电机按它 notes 的上板步骤走一遍，第 7 步确认类型 2 的角度上电就是一圈内的绝对角（见上面「中值（零点）」最后一条）。
+1. 先单电机上板走一遍，确认类型 2 的角度上电就是一圈内的绝对角（见上面「中值（零点）」最后一条）。2026-11-09 起用 `Test_Module/Gimbal/RS05_test`（步骤见其 notes.md；原来的 `C:\Clion\RS05` 第 7 步也是测这个）。
 2. 再按上面改本工程，连同 HostTest、CarSim 的电机模型一起改，两个主机测试都跑通后再上板，然后按「v1 调试步骤」从头标定、调参。
 
 ## v1 调试步骤与验收

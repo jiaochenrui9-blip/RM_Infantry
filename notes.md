@@ -1,7 +1,7 @@
 # RM_Infantry 项目笔记（总）
 
 > 给各个对话看：总进度、跨模块约定、硬件事实。各工程自己的进度写在各自目录的 notes.md。
-> 最后更新：2026-11-07（更正 RS05 零点：11-04 写的"上电后的角度可能差整数个 46.45°"是错的，用户的果园机器人工程 2026-10-22 已实测上电位置在输出轴一圈内是绝对的，云台中值能像 GM6020 那样写死；第 5、6、8 节）。2026-11-05（IMU 加热恒温代码改好、待上板，见第 6、8 节）。2026-11-04（IMU 加热恒温开工：查到加热电源只来自 24 V，记在第 5 节。同日早些时候：盘点了还没做的，见第 8 节；第 4 节加了发射机构要和云台电机分路。同日早些时候：云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020，CMake 编了 rs05.c 但没有调用。第 2、4、5、6、7 节有改动）
+> 最后更新：2026-11-10（yaw 摩擦前馈：用 RS05 自己的相对转速补摩擦，不用底盘陀螺仪和回传帧。同日后来用户让 Claude 加上了：Gimbal_test_RS05 的 gimbal.c 一个式子 + gimbal_config.h 三个宏，系数先给 0（用户定第一版保持 0、先不测）；测摩擦脚本 `tools/yaw_friction.py`。主机上验过，没上板。第 6 节、第 8 节第 4 条，细节见 Gimbal_test_RS05/notes.md「yaw 摩擦前馈」）。2026-11-09（Gimbal_test_RS05 改成单电机 + 拿在手里的 C 板来测：yaw 方向改成 −1；在线判断暂时只看 yaw，pitch 没装，装上要改回；test_cmd 加了测试模式 3，转 C 板时 yaw 电机跟着转。主机上验过，没上板。同日后来又加了不停核读写脚本 `Gimbal_test_RS05/tools/gimbal_watch.py`。2026-11-10 上板：模式 3 跟得上；加热恒温第一次在板子上看到工作（稳在 40 ℃）。yaw 闭环原来稳在离目标约 1.4° 处，原因是只有 P、推不动静摩擦；用户让 Claude 在板子上调了 PID，yaw 改成速度环 Kp 0.016、Ki 0.2，角度环 Kp 12，空载电机上稳态误差 < 0.02°。调完以后 C 板的 24 V 断了，CAN1 进了 BUS-OFF；用户让在 .ioc 里打开了 CAN1 的自动离线恢复（ABOM），以后能自己恢复。脚本改成在一直读的窗口里直接输入命令（在 PowerShell 提示符下敲 `set mode 1` 是 PowerShell 自己的 Set-Variable，什么都不会发生）。第 5、6、8 节。同日早些时候：加了 RS05 单电机测试工程 `Test_Module/Gimbal/RS05_test`：C 板 CAN1 上只接一个 RS05，比 `C:\Clion\RS05` 多了类型 17 读参数（mechPos、编码器原始值、转子角、圈数等），用 OpenOCD 不停核读写。上板前两次电机都不回话，第三次用 scan 查出来这台 RS05 在 MIT 协议（ID 1），切回私有协议后正常了。第 1、5、6、8 节。同日早些时候：加了 F405 底盘板工程 `F405_Project`。这块板是队友打的，用作底盘主控；.ioc 按网表配置，App 先从 Chassis_test 复制。两个 CAN 收发器的 STB 要由 MCU 拉低，这一点和 C 板不同。同日后来 App 暂时换成 CAN1 上一个 M2006 的速度环测试（先写在 CAN2，用户让改到 CAN1）。第 1、5、6、7、8 节）。2026-11-08（加了并列工程 `Gimbal_test_RS05`：同一套云台代码，云台电机换成 RS05，Gimbal_test 不动；主机测试 `HostTest_RS05` 和 GM6020 版共用场景。更正：.ioc 里 `CAN1.NART=ENABLE` 才是打开自动重发。第 1、2、4、6、8 节）。2026-11-07（更正 RS05 零点：11-04 写的"上电后的角度可能差整数个 46.45°"是错的，用户的果园机器人工程 2026-10-22 已实测上电位置在输出轴一圈内是绝对的，云台中值能像 GM6020 那样写死；第 5、6、8 节）。2026-11-05（IMU 加热恒温代码改好、待上板，见第 6、8 节）。2026-11-04（IMU 加热恒温开工：查到加热电源只来自 24 V，记在第 5 节。同日早些时候：盘点了还没做的，见第 8 节；第 4 节加了发射机构要和云台电机分路。同日早些时候：云台电机可能从 GM6020 换成灵足 RS05：RS05 驱动在用户的 RS05 测试工程 `C:\Clion\RS05` 里重写成只用电流模式，放进 `Shared/Devices/RS05`；云台工程还是 GM6020，CMake 编了 rs05.c 但没有调用。第 2、4、5、6、7 节有改动）
 
 ## 1. 项目组织
 
@@ -14,9 +14,13 @@ RM_Infantry/
 ├── notes.md                    ← 本文件
 ├── 硬件资料/                    ← C 板、C620、M3508、GM6020 手册（见其 README）
 ├── Shared/                     ← 各工程共用的 BSP / Devices / Algorithm / Link（用法见第 7 节）
+├── F405_Project/               ← 底盘主控板（队友打的 F405 板）的工程，现在跑 M2006 上板测试，底盘代码在 Chassis_test（2026-11-09），见其 notes.md
 ├── Test_Module/
 │   ├── Gimbal/Gimbal_test/     ← 云台测试工程，进度见其 notes.md
 │   ├── Gimbal/HostTest/        ← 云台主机测试：电脑上编译真代码 + 电机模型，改了云台代码就跑一遍（见其 README）
+│   ├── Gimbal/Gimbal_test_RS05/ ← 云台测试工程的 RS05 版（2026-11-08），和 Gimbal_test 并列，只差电机这一层
+│   ├── Gimbal/HostTest_RS05/   ← RS05 版的主机测试：场景和 HostTest 共用，电机模型换成 RS05
+│   ├── Gimbal/RS05_test/       ← RS05 单电机测试（2026-11-09）：C 板 CAN1 只接一个 RS05，OpenOCD 读写，见其 notes.md
 │   ├── CarSim/                 ← 整车主机仿真：云台板 + 底盘板真代码 + 整车模型，测各模式的配合（见其 README）
 │   └── Chassis/Chassis_test/   ← 底盘测试工程，进度见其 notes.md
 └── （以后）Infantry/            ← 合并工程
@@ -27,7 +31,7 @@ RM_Infantry/
 | 层 | 内容 | 位置 |
 |---|---|---|
 | BSP | 只封装 HAL 外设：can_bus；以后 USB 虚拟串口、SPI、UART、DWT | Shared/BSP |
-| Devices | 器件驱动：DJI 电机、BMI088、IST8310、RS05（2026-11-04 加，Gimbal_test 编了但还没调用）；以后 DR16 | Shared/Devices |
+| Devices | 器件驱动：DJI 电机、BMI088、IST8310、RS05（2026-11-04 加；Gimbal_test_RS05 用它，Gimbal_test 编了但没调用）；以后 DR16 | Shared/Devices |
 | Algorithm | 与硬件无关：PID、user_math（限幅、角度回绕）、Attitude（Mahony 姿态解算）；以后斜坡等 | Shared/Algorithm |
 | Link | 板间通信：帧格式、打包 / 解包。chassis_link（云台板发底盘指令、底盘板收），两块板编译同一份 | Shared/Link |
 | App 模块 | gimbal（Gimbal_test 已有）、chassis；以后 shoot、ins、robot_cmd | 各工程 App/ |
@@ -69,10 +73,10 @@ RM_Infantry/
 - 底盘默认放 CAN2，和云台分在两路：4 帧反馈 + 1 帧控制 / ms，按上面的帧长算负载约 56%~68%。两个测试工程是分开烧的，现在不冲突；Chassis_test 里改总线只改 robot.c 传给 `Chassis_Init` 的 manager。
 - 板间帧 0x110 不在大疆电机的过滤范围（0x200~0x20F）里，要单独配过滤器组：CAN1 用组 2、CAN2 用组 16（组 1 / 15 是 can_bus.h 里给扩展帧设备留的）。0x110 比大疆的控制帧（0x1FE~0x2FE）优先级高。
 - 板间那路（双板默认）：两个 GM6020 的反馈 + 0x1FE + 0x110 = 4 帧/ms，按上面的帧长约 44%~54%。底盘板的 CAN1 也挂在这路上，它在这路上什么也不发；它的大疆过滤器会收进云台电机的 0x205 / 0x206，没注册电机，直接忽略。以后发射机构的电机别再往这路加。
-- 两个工程的 CAN 都是 `AutoRetransmission = DISABLE`：每帧只发一次，出错或没有应答就丢掉，下一周期照常发。
-- RS05（云台可能换成它，还没换；细节见 Gimbal_test/notes.md「换 RS05」）：
+- Gimbal_test、Chassis_test 的 CAN 都是 `AutoRetransmission = DISABLE`：每帧只发一次，出错或没有应答就丢掉，下一周期照常发。Gimbal_test_RS05 的 CAN1 开了自动重发（见下一条）。
+- RS05（2026-11-08 有了并列工程 Gimbal_test_RS05，Gimbal_test 还是 GM6020；细节见 Gimbal_test/notes.md「换 RS05」）：
   - 私有协议是扩展帧，每个电机每毫秒一帧指令 + 一帧应答，每帧 131~160 bit。两个 RS05 加 0x110 在一路上约 64%~78%。
-  - 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110 和发给 RS05 的所有指令都优先。`AutoRetransmission = DISABLE` 时，C 板的帧和应答同时起步就会输掉仲裁、直接丢，所以换的那一路要在 .ioc 里打开自动重发。
+  - 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110 和发给 RS05 的所有指令都优先。`AutoRetransmission = DISABLE` 时，C 板的帧和应答同时起步就会输掉仲裁、直接丢，所以换的那一路要在 .ioc 里打开自动重发：`CAN1.NART=ENABLE`（CubeMX 里 `NART` 这一项就叫 Automatic Retransmission，默认 `DISABLE`；2026-11-08 生成代码确认过）。
   - 过滤器用 CAN1 组 1、CAN2 组 15（can_bus.h 预留的），只收类型 2。
   - F4 每路只有 3 个发送邮箱，RS05 每个电机每周期占一个。两个 RS05 加 0x110 正好 3 个，这一路上别再加别的周期帧。
 - 发射机构（还没写；按两个 M3508 摩擦轮 + 一个 M2006 拨弹盘算：0x200 + 3 帧反馈 = 4 帧标准帧/ms，约 44%~54%）要和云台电机分在两路：和两个 GM6020 加 0x110 放同一路约 89%~108%，和两个 RS05 放同一路约 97%~118%。云台用 GM6020、或者 RS05 留在 CAN1 时，发射机构放云台板 CAN2；RS05 挪到 CAN2 时，发射机构放 CAN1（加 0x110 约 56%~68%）。2026-11-04 盘点时按上面的帧长算的。
@@ -96,7 +100,7 @@ RM_Infantry/
 | 晶振 | HSE 12 MHz | |
 
 - 原理图上两路 CAN 收发器（TJA1044）后面都有 120 Ω 电阻，应是板载终端电阻 → 总线另一端（最远的电机）打开终端电阻即可。板间那路两头都是 C 板，两个板载电阻正好是两个终端，这路上的电机终端电阻都关。
-- CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。Gimbal_test 两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复；Chassis_test 两路都开了（2026-11-01，还没上板验证）。
+- CAN 收发器 TJA1044GTK/3：VCC 接 VCC_5V（24 V 经 SY8501 降压，或 USB 的 VBUS 经 DSS34 二极管），VIO 接 3.3 V，STB 接地。只靠调试器 3.3 V 供电时 CAN 发不出去，会进 bus-off（2026-10-30 实测）。Gimbal_test 两路 CAN 的 Automatic Bus-Off Management 都没开（can.c 里 `AutoBusOff = DISABLE`），bus-off 后要复位才能恢复；Chassis_test 两路都开了（2026-11-01，还没上板验证）。Gimbal_test_RS05 的 CAN1 2026-11-10 也打开了：当天 C 板的 24 V 断过，CAN1 进了 bus-off，没开时得复位 C 板。
 - GM6020：拨码 1~3 位设 ID（1~7），第 4 位是 CAN 终端电阻。反馈 1 kHz，编码器 0~8191，转速单位 rpm。电流控制 ±16384 对应 ±3 A，需要固件 ≥1.0.11.2，并在 RoboMaster Assistant（≥2.7）里打开电流环。
 - C620 + M3508：电调 ID 1~8 用 SET 键设（步骤见 Chassis_test/notes.md）；电流 ±16384 对应 ±20 A；反馈 0x200 + ID、默认 1 kHz，转速是转子 rpm（M3508 减速比 3591/187 ≈ 19.2）；电调上有 120 Ω 终端电阻开关；不能同时插 CAN 线和 PWM 线。
 - 灵足 RS05（手册在 `C:\Users\Lenovo\Desktop\Data\01_硬件资料\手册\RS05\RS05使用说明书_260713.pdf`，没放进 硬件资料/）：
@@ -104,21 +108,32 @@ RM_Infantry/
   - 机械：7.75:1 减速；编码器 14 bit 单圈绝对值。
   - 接口：CAN 1 Mbps；插头 XT30(2+2)，电源和 CAN 在一个插头上；手册没提终端电阻。
   - 协议：电机只在收到指令时回反馈；canTimeout 出厂是 0（不启用）；运行中不能切模式。
-  - 上电位置在输出轴一圈以内是绝对的，圈数不保存（用户的果园机器人工程 2026-10-22 两次断电实测，读的是 mechPos 0x7019，见 `C:\Project\Fruit-picking robot\notes.md` 第 2 节「RS05」）。上电读数 zero_sta = 0 时在 0~2π，= 1 时在 −π~π。所以云台中值能像 GM6020 那样写死，(position − zero) 折到 ±180°，前提是 RS05 直接带轴。按手册参数表的公式会推断成"上电只能确定到 46.45°"，实测不是。类型 2 的角度是不是和 mechPos 一回事还没确认（`C:\Clion\RS05\notes.md` 上板第 7 步）。
+  - 上电位置在输出轴一圈以内是绝对的，圈数不保存（用户的果园机器人工程 2026-10-22 两次断电实测，读的是 mechPos 0x7019，见 `C:\Project\Fruit-picking robot\notes.md` 第 2 节「RS05」）。上电读数 zero_sta = 0 时在 0~2π，= 1 时在 −π~π。所以云台中值能像 GM6020 那样写死，(position − zero) 折到 ±180°，前提是 RS05 直接带轴。按手册参数表的公式会推断成"上电只能确定到 46.45°"，实测不是。类型 2 的角度和 mechPos：2026-11-09 静止时读到 +6.3252 / +6.3255 rad，差在类型 2 的分辨率（约 0.0004 rad）以内，是同一个角度。转过 ±4π 以后会不会分开（类型 2 在 ±4π 循环，mechPos 是多圈的），还要手转确认（`Test_Module/Gimbal/RS05_test` 上板第 3 步）。
   - 和 C 板一起上电时，约 1.4 s 内不回话（果园工程实测），要等它回过话再使能。
-  - 反馈（类型 2）是输出端、减速后的：角速度范围 ±50 rad/s 对应空载 480 rpm，力矩 ±5.5 N·m 是峰值输出力矩（M3508 报的是转子）。编码器装在哪手册没写清：只列了一个 14 bit 编码器、叫它"转子（编码器）位置"，但上电时输出端一圈内是绝对的，光靠转子编码器做不到，输出端应该另有位置检测。
-  - 驱动和测试工程见 `C:\Clion\RS05\notes.md`。
+  - **先确认电机在私有协议**（2026-11-09 实测）：用户手上这台原来在 MIT 协议，ID 1，主机 ID 0xFD。在 MIT 协议时，它照样给私有协议的扩展帧应答（应答是 CAN 控制器硬件做的，所以 TEC、LEC 都是 0），但一帧都不回，看起来像 ID 不对。查法：`Test_Module/Gimbal/RS05_test` 的 `scan`。切回私有协议：MIT 下发标准帧指令 8（ID = 电机 ID，`FF FF FF FF FF FF 00 FD`），再给电机断电重启（手册第 6 章）。同日已经切回来了，现在是私有协议、ID 1。
+  - 电机自己的正方向（2026-11-09 用户实测）：从输出轴那一面（转盘那面）看，顺时针为正（用户确认是看的这一面）。正电流、正速度、类型 2 角度变大三者同号，所以云台里一个方向系数就够了。推出来装到云台上：yaw −1（Gimbal_test_RS05 2026-11-09 已改）；pitch 电机在左侧 −1、右侧 +1。装好以后以 RELAX 下手转为准，推法见 `Test_Module/Gimbal/RS05_test/notes.md`「第 3、4 步：方向」。类型 2 的角度在 ±12.56 之间循环，云台代码折到 ±180°，不受影响。
+  - 反馈（类型 2）是输出端、减速后的：角速度范围 ±50 rad/s 对应空载 480 rpm，力矩 ±5.5 N·m 是峰值输出力矩（M3508 报的是转子）。编码器装在哪手册没写清：只列了一个 14 bit 编码器、叫它"转子（编码器）位置"，但上电时输出端一圈内是绝对的，光靠转子编码器做不到，输出端应该另有位置检测。手册 3.3.4 节上位机参数表里有 encoderRaw（0x3004）、modPos（0x3015，电机未计圈机械角度）、rotation（0x3014，圈数）。2026-11-09 实测：类型 17 读这些 0x30xx（还有 0x2005 MechOffset）都回"读取失败"，只能读 4.1 节列的 0x70xx，所以这几个量只能在上位机里看。
+  - 驱动的设计和原来的测试工程见 `C:\Clion\RS05\notes.md`。单电机上板测试 2026-11-09 起用 `Test_Module/Gimbal/RS05_test`（见其 notes.md）。
+- 队友打的 F405 底盘主控板（2026-11-09 按网表整理，还没对照实物；完整引脚表在 `F405_Project/notes.md`）：
+  - STM32F405RGT6（LQFP64），HSE 8 MHz。
+  - CAN1 在 PB8/PB9，插座 2-pin：1 CANL、2 CANH。CAN2 在 PB12/PB13，插座 4-pin：1 5V、2 GND、3 CANH、4 CANL。插座线序和 C 板一样，两路都有板载 120 Ω，没有开关。
+  - **和 C 板不一样：** 两个 TJA1044 的 STB 接到 MCU（CAN1 接 PC1、CAN2 接 PC2），不是接地。TJA1044 手册（NXP Rev. 8.0，7.1、7.3.2 节）：STB 高电平是待机，待机时不能发送；STB 内部上拉，悬空也是待机。所以 .ioc 里这两个引脚必须配成输出、初始低电平。
+  - **实测（2026-11-09）**：第一块板上两片 TJA1044（3×3 mm 的 HVSON8 封装）都有引脚没焊上。U3 是 8 脚（STB），所以收发器一直在待机，表笔压一下就能通；U4 是 1、4 脚（TXD、RXD）和地。重焊后两路都正常了。查法：用 MCU 测芯片内部的上拉和 RXD 输出，再在空总线上发一帧，报"没有应答"（LEC 3）就说明收发器正常，报位错误（LEC 5）就是发不出去。见 `F405_Project/notes.md`「上板记录」。以后拿到新板，先用这个办法查一遍收发器。
+  - **CAN2 口（CN8/CN9）的 1 脚是这块板的 5 V**。2026-11-09 用一根线把 CN8 接到分电板，结果这块板的 5 V 被拉低，两路 CAN 一起罢工，拔掉线就好了。跟别的板子连 CAN 之前先对线序，最好只接 CANH、CANL、GND，不接 5 V。C 板的 CAN2 口也是这个线序，同样要注意。
+  - 收发器 VCC 的 5 V 只能由 24 V 降压得到；USB 的 VBUS 没接，只插 USB 板子不上电。只接调试器时 CAN 用不了，这一点和 C 板一样。
+  - 板上还有：BMI088（SPI1，引脚和 C 板不同）、DBUS（USART3_RX PB11，硬件反相）、两路 UART、两路 RS485（UART4、USART6）、USB-C。
+  - 没有 LED、蜂鸣器、用户按键、IMU 加热。
 
 ## 6. 各模块进度
 
 | 模块 | 工程 | 状态 |
 |---|---|---|
-| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」。2026-11-04：云台电机可能换成 RS05。驱动已写好，放在 `Shared/Devices/RS05`（在 `C:\Clion\RS05` 里测，还没上板）；云台工程还是 GM6020，换的步骤见其 notes.md「换 RS05」；RS05 上电位置在一圈内是绝对的（果园工程实测），中值照 GM6020 写死，见其「中值（零点）」。v2 第 3 步 IMU 加热恒温：2026-11-04 定接口、.ioc 配 TIM10_CH1（PF6），11-05 用户第一版审查后 Claude 改好，ARM 编译无警告、主机模型里符合预期，还没上板（要接 24 V），见其「第 3 步进度」 |
-| 底盘 | Test_Module/Chassis/Chassis_test | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。2026-11-01 用户开始写（Infantry.h / Infantry_Chassis.c，速度环用电机层自带的），按用户要求 Claude 写好了初始化、板间指令接收（chassis_link）和 `Chassis_Update`（四种模式、掉线锁定、斜坡、坐标变换、逆运动学；轮型只体现在两个参数上），ARM 编译无警告、主机模型测试通过，没上板。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`）。2026-11-02 用户把 Infantry.h 改名为 Infantry_Chassis.h；2026-11-03 chassis_link 搬到 Shared/Link、两个类型移进 chassis_link.h（和云台板共用），代码没改 |
+| 云台 | Test_Module/Gimbal/Gimbal_test | App 精简版 v1（robot / gimbal / test_cmd，只有编码器定角度，含速度前馈，499 行）：2026-10-29 本机清理编译无警告，主机闭环测试通过；未上板，参数待标定。v2（ins + IMU 模式）接口已定：第 1 步 ins 已接入 robot.c，2026-10-30 首次上板（只接调试器 3.3 V）程序运行正常，ins 桌面验收通过（手转符号都对）；第 2 步云台 IMU 模式接口 2026-10-30 细化（限位算法已在主机上验证），用户写的第一版（gimbal / robot）2026-10-31 审查后由 Claude 改好：ARM 清理编译无警告，主机模型测试通过，还没上板，见其 notes.md。带 IMU 的旧完整版备份在 Test_Module/Gimbal/Backup。板间通信：2026-11-03 定了云台板发底盘指令的接口（`ChassisLink_SendCmd`，在 Shared/Link），函数体、指令源和 robot.c 用户同日写了第一版，审查发现 vx 高字节写错（1 m/s 收成 0.488）、联锁看的是云台指令模式而不是实际模式，用户让 Claude 改好：ARM 清理编译无警告，主机往返、联锁测试通过，还没上板，见其 notes.md「板间通信」的「第一版审查」。2026-11-04：云台电机可能换成 RS05。驱动已写好，放在 `Shared/Devices/RS05`（在 `C:\Clion\RS05` 里测，还没上板）；云台工程还是 GM6020，换的步骤见其 notes.md「换 RS05」；RS05 上电位置在一圈内是绝对的（果园工程实测），中值照 GM6020 写死，见其「中值（零点）」。v2 第 3 步 IMU 加热恒温：2026-11-04 定接口、.ioc 配 TIM10_CH1（PF6），11-05 用户第一版审查后 Claude 改好，ARM 编译无警告、主机模型里符合预期，还没上板（要接 24 V），见其「第 3 步进度」。2026-11-08：按「换 RS05」做了并列工程 `Test_Module/Gimbal/Gimbal_test_RS05`（从已提交的 Gimbal_test 复制，只差电机这一层；ARM 0 警告，FLASH 38584 B / RAM 3144 B；`HostTest_RS05` 同一套 16 个场景 0 失败；未上板），Gimbal_test 没动。以后 Gimbal_test 的 ins、test_cmd、robot.c、.ioc 改了要手动同步过去，对比方法见其 notes.md。2026-11-09：建了 RS05 单电机测试工程 `Test_Module/Gimbal/RS05_test`（C 板，只开 CAN1；OpenOCD 读写脚本 `tools/rs05_watch.py`）。同日上板两次，电机都不回话。总线是好的，C 板的帧有人应答（TEC、LEC 都是 0），软件配置用 OpenOCD 查过都对；私有协议给 ID 0~127 都发过，没有一个回话。固件改成什么帧都收、能发任意一帧，脚本的 scan 三种协议都试（ARM 0 警告，FLASH 12896 B / RAM 2072 B；主机检查 486 项全过）。第三次上板 scan 查出来：这台 RS05 在 MIT 协议、ID 1，没有故障。用户切回私有协议后正常了：类型 2 1 kHz，mechPos 和类型 2 的角度一致；类型 17 读不了 0x20xx / 0x30xx。下一步手转、看电流方向，见其 notes.md「上板记录」。同日后来手转、电流方向测完（从输出轴那面看顺时针为正），用户手上只有一个 RS05、没有 pitch 电机，要“C 板标定好以后，转 C 板，yaw 电机跟着转”，在 Gimbal_test_RS05 里改了三处：`GIMBAL_YAW_DIRECTION` 改成 −1；`Gimbal_Update` 的在线判断暂时只看 yaw（装上 pitch 要改回）；test_cmd 加了测试模式 3（发给云台的是编码器模式，yaw 目标 = C 板 yaw + 进模式时算好的差，所以进模式时电机不动；C 板装到云台以后别用，会一直转）。ARM 0 警告，FLASH 38616 B / RAM 3144 B；HostTest_RS05 0 失败，模式 3 另在临时目录检查 19 项全过；没上板。用法、注意事项见其 notes.md「单电机：yaw 跟着 C 板转」。2026-11-10：Gimbal_test_RS05 的 yaw 加了摩擦前馈（系数是 0 = 关，用户定第一版保持 0、先不测；Gimbal_test 没有）和测摩擦脚本 `tools/yaw_friction.py`；ARM 0 警告，HostTest_RS05 0 失败，脚本在假板子上、前馈在加了库仑摩擦的主机模型里验过，没上板，见其 notes.md「yaw 摩擦前馈」 |
+| 底盘 | Test_Module/Chassis/Chassis_test（C 板）、F405_Project（F405 板） | 2026-11-01 建好工程：.ioc 由 Gimbal_test.ioc 改来（只留 CAN1 / CAN2，打开自动离线恢复），CubeMX 生成，CMake 接 Shared，App 只有空的 robot.c；清理编译无警告，没上板。接口按步兵逻辑定了（四种模式：RELAX / 不跟随 / 跟随云台 / 小陀螺；指令是云台坐标系的平移速度 + 云台相对角；板间帧 0x110），分 3 步写，见其 notes.md；轮型未定，麦轮 / 全向轮公式都写了。2026-11-01 用户开始写（Infantry.h / Infantry_Chassis.c，速度环用电机层自带的），按用户要求 Claude 写好了初始化、板间指令接收（chassis_link）和 `Chassis_Update`（四种模式、掉线锁定、斜坡、坐标变换、逆运动学；轮型只体现在两个参数上），ARM 编译无警告、主机模型测试通过，没上板。用户还没有电机。参考用户的果园机器人底盘（全向轮，已上板调通，在 `C:\Project\Fruit-picking robot`）。2026-11-02 用户把 Infantry.h 改名为 Infantry_Chassis.h；2026-11-03 chassis_link 搬到 Shared/Link、两个类型移进 chassis_link.h（和云台板共用），代码没改。2026-11-09：底盘主控用队友打的 F405 板，建了并列工程 `F405_Project`（在仓库根目录下）。App 从 Chassis_test 原样复制；.ioc 按网表配置（CAN1 PB8/PB9、CAN2 PB12/PB13、两个收发器的 STB 拉低），CubeMX 命令行生成。ARM 0 警告，FLASH 21108 B / RAM 2952 B，没上板。同日后来用户让先去掉底盘逻辑：App 换成单个 M2006（C610 ID 1）、速度环转到 500 转子 rpm 的上板测试（PID 3 / 20 / 0 没调过，限幅 2 A）。总线先是 CAN2，后改到 CAN1，最后电机经分电板接到 CAN2，又改回 CAN2。ARM 0 警告，FLASH 14772 B / RAM 1904 B，主机检查通过。同日第一次上板 M2006 不转：用 OpenOCD 读状态，软件和配置都对；两路 CAN 收发器都没往总线上驱动（CAN1 一直 bus-off，CAN2 测试帧读不回显性），静默模式下也解不出帧。用户确认 24 V 和 TJA1044 的 5 V 都正常。后来用户拿电压表量 U3 的 STB 时电机转了（收到 6071 帧 0x201），拿开就停。再用 MCU 逐个测芯片引脚（借芯片内部的上拉和 RXD 输出），查出 U3 的 8 脚（STB）没焊上，U4 的 1 脚（TXD）、4 脚（RXD）没焊上。两片 TJA1044 都要重焊，软件不用改。用户重焊后 CAN1 正常了：1 kHz 反馈，TEC/REC 都是 0，M2006 平均稳在 500 转子 rpm（标准差约 50，PID 3/20/0 还没调）。U4 再焊以后，CAN2 测试帧报"没有应答"（LEC 3），说明 U4 也正常了，两路 CAN 都好了。CAN2 还没接电调实际收发过。见其 notes.md「上板记录」。恢复成底盘程序的方法见其 notes.md。底盘版时，Chassis_test 的 App、.ioc 改了要手动同步过去 |
 
 ## 7. Shared 的用法与改动记录
 
-新工程照 Gimbal_test 顶层 CMakeLists.txt 的写法引用（Chassis_test 已这样接，2026-11-01；只加了它用到的文件），`../` 的层数按工程所在位置改：
+新工程照 Gimbal_test 顶层 CMakeLists.txt 的写法引用（Chassis_test 已这样接，2026-11-01；只加了它用到的文件。F405_Project 在仓库根目录下一层，写 `../Shared`，2026-11-09），`../` 的层数按工程所在位置改：
 
 ```cmake
 get_filename_component(SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared" ABSOLUTE)
@@ -127,7 +142,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 ```
 
 - Shared 不在工程目录内，CLion 项目树默认看不到；需要的话用 Tools → CMake → Change Project Root 把根目录设为 RM_Infantry。
-- Shared 里的代码 include 各工程自己的 `main.h`（STM32F4 HAL），只适用于 F4 + HAL 的工程（C 板都满足）。
+- Shared 里的代码 include 各工程自己的 `main.h`（STM32F4 HAL），只适用于 F4 + HAL 的工程（C 板、F405 板都满足；F405 和 F407 的 bxCAN 一样，也是 28 个过滤器组，can_bus.h 的分组照用）。
 
 | 日期 | 改动 | 验证 |
 |---|---|---|
@@ -147,8 +162,10 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 按离车能不能验分组。离车能验的先做：现在除了 ins 在桌上验过，云台控制、底盘、板间通信、RS05 驱动都只在主机上测过，再多写只能主机测的代码，上车时问题会叠在一起。
 
 1. 已经写好、离车就能验（不写新代码）：
-   - RS05 单电机上板（`C:\Clion\RS05\notes.md`）。要 RS05、24 V；第 0 步设 ID 要上位机 + USB-CAN。上电绝对角果园工程已经测过（第 5 节），不再卡 yaw 能不能用 RS05；第 7 步只确认类型 2 的角度也一样（2026-11-07 改）。
-   - 两板通信验收（Gimbal_test/notes.md「板间通信」验收 1~3）。要两块 C 板，都要有 5 V（接 24 V 或插 USB）。
+   - RS05 单电机上板：2026-11-09 起用 `Test_Module/Gimbal/RS05_test`，步骤见其 notes.md（原来的 `C:\Clion\RS05` 也还能用，但它不读类型 17 参数）。要 RS05、24 V；第 0 步设 ID 要上位机 + USB-CAN。上电绝对角果园工程已经测过（第 5 节），不再卡 yaw 能不能用 RS05；第 7 步只确认类型 2 的角度也一样（2026-11-07 改）。
+   - 单电机 + 拿在手里的 C 板：转 C 板，yaw 电机跟着转（Gimbal_test_RS05 模式 3，2026-11-09）。要 RS05、C 板、24 V。这也是第一次在真电机上闭环，C 板接 24 V 的话还是加热恒温第一次上板。步骤见 Gimbal_test_RS05/notes.md「单电机：yaw 跟着 C 板转」。
+   - 两板通信验收（Gimbal_test/notes.md「板间通信」验收 1~3）。要两块 C 板，都要有 5 V（接 24 V 或插 USB）。底盘板也可以用 F405 板，但它只能接 24 V。
+   - F405 底盘板上板验收（`F405_Project/notes.md`「上板验收」第 1~3 步）：时钟、STB 电平、M2006 转到 500（现在程序用 CAN2）。要这块板、DAPLink、24 V、一个 M2006 + C610（ID 1）。
    - C 板轴向对应实物的哪条边（ins 第 1 步留下的，Gimbal_test/notes.md 标定记录）。只要 C 板。
    - 云台（或 yaw）留 GM6020、手上有电机的话：桌上先查固件版本、打开电流环（Gimbal_test 已知问题第 4 条）。
 2. 要新写、离车能写完也能验完：
@@ -157,6 +174,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
    - IMU 加热恒温（云台 v2 第 3 步，做法见 Gimbal_test/notes.md「第 3 步」）。只要 C 板，但要接 24 V（加热电源只来自 24 V，第 5 节）。2026-11-04 开始：.ioc 已配 TIM10_CH1（PF6）并生成，接口已定。用户第一版 11-05 审查出 12 处要改，用户让 Claude 改好：ARM 清理编译无警告，主机模型里符合预期，**还没上板**（Gimbal_test/notes.md「第 3 步进度」）。第一版在 `Shared/Algorithm/user_math` 加的 `Math_GetAbs` 已撤回（改用 fabsf），Shared 没有净改动。
    - 三项都要改 Gimbal_test 的 .ioc 和 robot.c，一次做一项。
 3. 能写、离车只能主机测：发射机构（摩擦轮 + 拨弹盘）。要等机械定电机、拨盘格数；放哪路 CAN 见第 4 节最后一条。
-4. 以后：裁判系统（底盘功率控制、枪口热量控制都要它的数据）、底盘 → 云台回传帧、超级电容、视觉通信、云台换 RS05（先做第 1 组第一项）、单板 / 双板定了以后的合并工程。
+4. 以后：裁判系统（底盘功率控制、枪口热量控制都要它的数据）、底盘 → 云台回传帧（2026-11-10：yaw 的底盘角速度前馈不用它，云台板用 RS05 自己的相对转速就行，见 Gimbal_test_RS05/notes.md「yaw 摩擦前馈」）、超级电容、视觉通信、单板 / 双板定了以后的合并工程。云台换 RS05：并列工程 Gimbal_test_RS05 已写好（2026-11-08，ARM 0 警告、主机测试全过），上板前先做第 1 组第一项。
 
-还没定、会卡住后面的：云台电机（GM6020 / RS05，或 pitch、yaw 各用一种）；单板 / 双板；底盘轮型；发射机构用什么电机。
+还没定、会卡住后面的：云台电机（GM6020 / RS05，或 pitch、yaw 各用一种）；单板 / 双板（2026-11-09：队友的 F405 板用作底盘主控，见第 6 节）；底盘轮型；发射机构用什么电机。
