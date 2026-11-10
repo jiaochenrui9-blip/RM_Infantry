@@ -4,6 +4,8 @@
 不需要 STM32、电机，几秒钟跑完；改了云台代码就跑一遍，确认没把原来对的东西改坏（回归测试）。
 
 > 这是电脑上的独立 CMake 工程，**不要**加进 `Gimbal_test` 的 ARM 工程里。
+>
+> `test_gimbal.c` 和 `stub/main.h` 也被 `../HostTest_RS05`（RS05 版云台 `Gimbal_test_RS05` 的主机测试）直接用（2026-11-08 起）。场景里只用 `gimbal_sim.h` 的接口和两版 `gimbal_config.h` 都有的宏，别直接用 GM6020 专有的（`*_ESC_ID`、`*_ECD_OFFSET`、16384）；改完两个都跑一遍。
 
 ## 1. 怎么跑
 
