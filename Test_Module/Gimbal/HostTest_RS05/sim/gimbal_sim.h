@@ -39,7 +39,7 @@ typedef struct
 {
     SimAxis_t yaw;
     SimAxis_t pitch;
-    float pitch_gravity_nm; /* pitch 水平时的重力矩（N·m），抬头为正，默认 0 */
+    float pitch_gravity_nm; /* pitch 水平时的重力矩（N·m），往下拉为正；Sim_Reset 给车上实测的值（gimbal_sim.c 的 SIM_PITCH_GRAVITY_NM） */
     uint8_t imu_valid;      /* 传给云台的 valid */
     uint8_t imu_frozen;     /* 1：IMU 数据停在上一次的值（模拟采样卡住） */
     FILE *trace;            /* 非 NULL 时每个周期写一行 CSV，见 Sim_TraceHeader */

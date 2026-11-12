@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Gimbal_test_RS05 的读数脚本：通过 OpenOCD（DAPLink）不停核读写云台、ins 的变量。
-
-现在是单电机阶段（只有 yaw，C 板拿在手里），只看 yaw；装上 pitch 以后再加 pitch 的列。
+"""Gimbal_test_RS05 的读数脚本：通过 OpenOCD（DAPLink）不停核读写云台、ins 的变量。yaw、pitch 两个轴都读。
 
 用法（程序已经烧进板子在跑）。在哪个目录下运行都行，路径写全：
     python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/gimbal_watch.py
 下面简写成 gimbal_watch.py：
-    gimbal_watch.py                     一直读，每 0.2 s 打一行，Ctrl+C 退出
+    gimbal_watch.py                     一直读，每 0.2 s 打一行，Ctrl+C 退出（一行约 130 个字，窗口拉宽一点）
     gimbal_watch.py --once              读一次，打全部字段；有问题时给出该查什么
-    gimbal_watch.py set mode 3          写 gimbal_test.gimbal_mode：0 无力 / 1 编码器 / 2 IMU / 3 yaw 跟着 C 板转
-    gimbal_watch.py set yaw 30          写 gimbal_test.yaw_deg（度）
-    gimbal_watch.py add yaw 5           gimbal_test.yaw_deg 加 5°
+    gimbal_watch.py set mode 1          写 gimbal_test.gimbal_mode：0 无力 / 1 编码器 / 2 IMU（模式 2 要输入 y 确认）
+    gimbal_watch.py set yaw 30          写 gimbal_test.yaw_deg（度）；set pitch 10 写 pitch_deg
+    gimbal_watch.py add yaw 5           gimbal_test.yaw_deg 加 5°；add pitch 同理
+    gimbal_watch.py set chassis 3       写 gimbal_test.chassis_mode：0 无力 / 1 不跟随 / 2 跟随 / 3 小陀螺（1~3 要输入 y
+                                        确认）。2、3 要云台实际在模式 2，否则发给底盘的是 1；ch 列是真正发出去的那个
     gimbal_watch.py set speed_kp 0.016  改 yaw 速度环的 Kp（板子复位后回到 gimbal_config.h 里的值）
     gimbal_watch.py set speed_ki 0.2    改 yaw 速度环的 Ki（同上）。PID 在 Ki = 0 时积分照样在攒，直接改会让 I 项一下顶到
                                         限幅，所以脚本先处理积分：原来 Ki 是 0 就清零，不是 0 就按比例缩放，I 项不跳
     gimbal_watch.py set angle_kp 12     改 yaw 角度环的 Kp（同上）
+    gimbal_watch.py set pitch_speed_kp 0.004   pitch 的三个：pitch_speed_kp、pitch_speed_ki、pitch_angle_kp，和 yaw 的一样
 
 - 边看边改：一直读的时候，直接在同一个窗口里输入命令再回车，比如 set mode 1、add yaw 5、set speed_kp 0.002
   （和上面一样，只是不写前面的 python 和路径），还有 once（打全部字段）。输入的字会和刷新的行混在一起，打完回车就行。
@@ -61,6 +62,8 @@ CAN1_ESR = 0x40006418           # bxCAN 错误状态寄存器：bit2 BOFF、bit6
 TEST_FORMAT = "<BxxxffBxxxffffI"
 TEST_MODE_OFFSET = 0
 TEST_YAW_OFFSET = 4
+TEST_PITCH_OFFSET = 8
+TEST_CHASSIS_OFFSET = 12        # chassis_mode，也是 1 字节
 # GimbalAxis_t：motor, direction, zero_rad, min_deg, max_deg, angle_pid, speed_pid, angle_deg, rate_dps, target_deg
 AXIS_FORMAT = "<28sbxxxfff60s60sfff"
 AXIS_ANGLE_PID_OFFSET = 44
@@ -78,6 +81,7 @@ INS_FORMAT = "<Bxxxffff"
 SYMBOLS = {
     "gimbal_test": struct.calcsize(TEST_FORMAT),
     "gimbal_yaw": struct.calcsize(AXIS_FORMAT),
+    "gimbal_pitch": struct.calcsize(AXIS_FORMAT),
     "gimbal_mode": 1,
     "gimbal_fault": 1,
     "ins_feedback": struct.calcsize(INS_FORMAT),
@@ -102,15 +106,25 @@ PID_INTEGRAL_OFFSET = 32
 WRITABLE = {
     "mode": ("gimbal_test", TEST_MODE_OFFSET, "u8"),
     "yaw": ("gimbal_test", TEST_YAW_OFFSET, "f32"),
+    "pitch": ("gimbal_test", TEST_PITCH_OFFSET, "f32"),
     "speed_kp": ("gimbal_yaw", AXIS_SPEED_PID_OFFSET, "f32"),
     "speed_ki": ("gimbal_yaw", AXIS_SPEED_PID_OFFSET + PID_KI_OFFSET, "f32"),
     "angle_kp": ("gimbal_yaw", AXIS_ANGLE_PID_OFFSET, "f32"),
+    "pitch_speed_kp": ("gimbal_pitch", AXIS_SPEED_PID_OFFSET, "f32"),
+    "pitch_speed_ki": ("gimbal_pitch", AXIS_SPEED_PID_OFFSET + PID_KI_OFFSET, "f32"),
+    "pitch_angle_kp": ("gimbal_pitch", AXIS_ANGLE_PID_OFFSET, "f32"),
+    "chassis": ("gimbal_test", TEST_CHASSIS_OFFSET, "u8"),
 }
-WRITABLE_NAMES = {"mode": "gimbal_test.gimbal_mode", "yaw": "gimbal_test.yaw_deg",
+WRITABLE_NAMES = {"mode": "gimbal_test.gimbal_mode", "yaw": "gimbal_test.yaw_deg", "pitch": "gimbal_test.pitch_deg",
+                  "chassis": "gimbal_test.chassis_mode",
                   "speed_kp": "gimbal_yaw.speed_pid.Kp", "speed_ki": "gimbal_yaw.speed_pid.Ki",
-                  "angle_kp": "gimbal_yaw.angle_pid.Kp"}
+                  "angle_kp": "gimbal_yaw.angle_pid.Kp",
+                  "pitch_speed_kp": "gimbal_pitch.speed_pid.Kp", "pitch_speed_ki": "gimbal_pitch.speed_pid.Ki",
+                  "pitch_angle_kp": "gimbal_pitch.angle_pid.Kp"}
 
-MODE_NAMES = {0: "无力", 1: "编码器闭环", 2: "IMU 闭环", 3: "yaw 跟着 C 板转（测试用，发给云台的是编码器闭环）"}
+MODE_NAMES = {0: "无力", 1: "编码器闭环", 2: "IMU 闭环"}
+CHASSIS_MODE_NAMES = {0: "无力", 1: "不跟随", 2: "跟随", 3: "小陀螺"}   # chassis_link.h 的 ChassisMode_e
+POSITIVE = {"yaw": "俯视逆时针", "pitch": "抬头"}       # 两个轴的正方向（gimbal_config.h 开头）
 BMI088_NAMES = {0: "正常", 1: "加速度计 ID 不对", 2: "陀螺仪 ID 不对", 3: "空指针", 4: "SPI 出错",
                 5: "配置回读不对", 6: "还没初始化", 7: "数据不对", 8: "忙"}
 STATE_NAMES = {0: "Reset（停止）", 1: "Cali（标定）", 2: "Motor（运行）"}
@@ -276,23 +290,36 @@ def unpack_pid(raw):
     return dict(zip(PID_FIELDS, struct.unpack(PID_FORMAT, raw)))
 
 
-def read_state(ocd, symbols):
-    # 先读 tick，紧接着读电机（在 gimbal_yaw 里）和 ins 的最后样本时间。经 DAPLink 每读一次要 1~2 ms，
-    # 中间隔的读越多，算出来的“几毫秒前”就越大（2026-11-10 第一版最后才读 tick，正常时也显示 19~20 ms）。
-    # 时间戳比 tick 新时按 0 算（tick_age）
-    tick = ocd.read(symbols["uwTick"][0], 32, 1)[0]
-    axis = struct.unpack(AXIS_FORMAT, ocd.read_bytes(*symbols["gimbal_yaw"]))
-    ins_last = ocd.read(symbols["ins_last_tick"][0], 32, 1)[0]
+def unpack_axis(raw):
+    """GimbalAxis_t（gimbal_yaw / gimbal_pitch）拆成字典。"""
+    axis = struct.unpack(AXIS_FORMAT, raw)
     motor = struct.unpack(MOTOR_FORMAT, axis[0])
-    test = struct.unpack(TEST_FORMAT, ocd.read_bytes(*symbols["gimbal_test"]))
-    ins = struct.unpack(INS_FORMAT, ocd.read_bytes(*symbols["ins_feedback"]))
-    s = {
+    a = {
         "direction": axis[1], "zero_rad": axis[2], "min_deg": axis[3], "max_deg": axis[4],
         "angle_pid": unpack_pid(axis[5]), "speed_pid": unpack_pid(axis[6]),
         "angle": axis[7], "rate": axis[8], "target": axis[9],
         "motor_id": motor[0], "enable": motor[1], "iq": motor[2], "enable_step": motor[3],
         "pos": motor[4], "vel": motor[5], "state": motor[6], "fault": motor[7], "fb_tick": motor[8],
-        "cmd_mode": test[0], "yaw_cmd": test[1],
+    }
+    # 发给电机的是 direction × 电流（gimbal.c 的 Gimbal_AxisOutput），再乘一次方向就是按云台正方向的电流
+    a["current"] = a["direction"] * a["iq"]
+    return a
+
+
+def read_state(ocd, symbols):
+    """yaw 的字段放在最外层（yaw_friction.py 也这样用），pitch 的在 s["pitch"] 里，键名和 yaw 一样。"""
+    # 先读 tick，紧接着读两个电机（在 gimbal_yaw、gimbal_pitch 里）和 ins 的最后样本时间。经 DAPLink 每读一次要 1~2 ms，
+    # 中间隔的读越多，算出来的“几毫秒前”就越大（2026-11-10 第一版最后才读 tick，正常时也显示 19~20 ms）。
+    # 时间戳比 tick 新时按 0 算（tick_age）
+    tick = ocd.read(symbols["uwTick"][0], 32, 1)[0]
+    s = unpack_axis(ocd.read_bytes(*symbols["gimbal_yaw"]))
+    s["pitch"] = unpack_axis(ocd.read_bytes(*symbols["gimbal_pitch"]))
+    ins_last = ocd.read(symbols["ins_last_tick"][0], 32, 1)[0]
+    test = struct.unpack(TEST_FORMAT, ocd.read_bytes(*symbols["gimbal_test"]))
+    ins = struct.unpack(INS_FORMAT, ocd.read_bytes(*symbols["ins_feedback"]))
+    s.update({
+        "cmd_mode": test[0], "yaw_cmd": test[1], "pitch_cmd": test[2],
+        "chassis_cmd": test[3], "vx_cmd": test[4], "vy_cmd": test[5],
         "valid": ins[0], "imu_yaw": ins[1], "imu_pitch": ins[2], "imu_yaw_rate": ins[3], "imu_pitch_rate": ins[4],
         "temp_pid": unpack_pid(ocd.read_bytes(*symbols["ins_bmi088_temp_pid"])),
         "mode": ocd.read(symbols["gimbal_mode"][0], 8, 1)[0],
@@ -300,25 +327,39 @@ def read_state(ocd, symbols):
         "ins_status": ocd.read(symbols["ins_init_status"][0], 8, 1)[0],
         "cal": ocd.read(symbols["ins_calibrate_count"][0], 32, 1)[0],
         "ins_last": ins_last, "tick": tick,
-    }
+    })
     esr = ocd.read(CAN1_ESR, 32, 1)[0]
     s.update(tec=(esr >> 16) & 0xFF, rec=(esr >> 24) & 0xFF, lec=(esr >> 4) & 0x7, boff=(esr >> 2) & 1)
-    # 发给电机的是 direction × 电流（gimbal.c 的 Gimbal_AxisOutput），再乘一次方向就是按云台正方向（俯视逆时针为正）的电流
-    s["current"] = s["direction"] * s["iq"]
     return s
+
+
+def axes(s):
+    return (("yaw", s), ("pitch", s["pitch"]))
+
+
+def chassis_sent(s):
+    """发给底盘的模式：跟随、小陀螺要云台实际在模式 2，不然 gimbal_test_cmd.c 降成 1（不跟随）。"""
+    if s["chassis_cmd"] in (2, 3) and s["mode"] != 2:
+        return 1
+    return s["chassis_cmd"]
 
 
 def layout_problems(s):
     """ELF 不是板子里那次编译的时候地址是错的，这几条基本不可能同时成立。返回不成立的那几条。"""
-    angle, speed, temp = s["angle_pid"], s["speed_pid"], s["temp_pid"]
-    checks = [
-        (s["direction"] in (-1, 1), f"gimbal_yaw.direction = {s['direction']}（应为 1 或 -1）"),
-        (s["motor_id"] <= 127, f"gimbal_yaw.motor.id = {s['motor_id']}（应在 0~127）"),
-        (s["min_deg"] < s["max_deg"], f"yaw 限位 {s['min_deg']:g} ~ {s['max_deg']:g}"),
-        (angle["outMax"] > 0 and angle["outMin"] == -angle["outMax"],
-         f"角度环输出限幅 {angle['outMin']:g} ~ {angle['outMax']:g}（应正负对称）"),
-        (speed["outMax"] > 0 and speed["outMin"] == -speed["outMax"],
-         f"速度环输出限幅 {speed['outMin']:g} ~ {speed['outMax']:g}（应正负对称）"),
+    temp = s["temp_pid"]
+    checks = []
+    for name, a in axes(s):
+        angle, speed = a["angle_pid"], a["speed_pid"]
+        checks += [
+            (a["direction"] in (-1, 1), f"gimbal_{name}.direction = {a['direction']}（应为 1 或 -1）"),
+            (a["motor_id"] <= 127, f"gimbal_{name}.motor.id = {a['motor_id']}（应在 0~127）"),
+            (a["min_deg"] < a["max_deg"], f"{name} 限位 {a['min_deg']:g} ~ {a['max_deg']:g}"),
+            (angle["outMax"] > 0 and angle["outMin"] == -angle["outMax"],
+             f"{name} 角度环输出限幅 {angle['outMin']:g} ~ {angle['outMax']:g}（应正负对称）"),
+            (speed["outMax"] > 0 and speed["outMin"] == -speed["outMax"],
+             f"{name} 速度环输出限幅 {speed['outMin']:g} ~ {speed['outMax']:g}（应正负对称）"),
+        ]
+    checks += [
         ((temp["outMin"], temp["outMax"], temp["integralMin"], temp["integralMax"]) == (0.0, 1.0, 0.0, 1.0),
          f"加热 PID 限幅 {temp['outMin']:g} ~ {temp['outMax']:g}（应为 0 ~ 1）"),
         (s["mode"] <= 2 and s["lock"] <= 1, f"gimbal_mode = {s['mode']}、gimbal_fault = {s['lock']}"),
@@ -332,26 +373,33 @@ def tick_age(s, past_tick):
     return max(0, s["tick"] - past_tick)
 
 
-def feedback_age(s):
-    if s["fb_tick"] == 0:
+def feedback_age(s, a):
+    """a 是一个轴（s 本身是 yaw，s["pitch"] 是 pitch）。"""
+    if a["fb_tick"] == 0:
         return "--"
-    age = tick_age(s, s["fb_tick"])
+    age = tick_age(s, a["fb_tick"])
     return str(age) if age < 1000 else ">1s"
 
 
-HEADER = (f"{'tick':>9} | {'T_C':>5} {'duty':>4} {'cal':>5} v {'imu_yaw':>8} | cmd md lk {'yaw_deg':>8} | "
-          f"{'angle':>8} {'target':>8} {'I_A':>6} | {'fb':>3} st flt | TEC LEC")
+# 每个轴：编码器角、斜坡后的目标、电流（都按云台正方向），反馈几毫秒前、电机 state、fault。
+# 指令里的 yaw_deg / pitch_deg 不在这一行（--once 里有），这一行看的是斜坡后的目标
+HEADER = (f"{'tick':>8} | {'T_C':>5} {'cal':>5} v {'imu_y':>7} {'imu_p':>7} | cmd md lk ch | "
+          f"{'yaw':>7} {'y_tgt':>7} {'y_I':>6} {'fb':>3} s fl | {'pitch':>7} {'p_tgt':>7} {'p_I':>6} {'fb':>3} s fl | TEC LEC")
+
+
+def axis_cells(s, a):
+    return (f"{a['angle']:+7.2f} {a['target']:+7.2f} {a['current']:+6.3f} "
+            f"{feedback_age(s, a):>3} {a['state']:>1} {a['fault']:02X}")
 
 
 def print_line(s, header):
     temp = s["temp_pid"]
     if header:
         print(HEADER)
-    print(f"{s['tick']:>9} | {temp['actual']:5.1f} {temp['out'] * 100:3.0f}% {s['cal']:>5} {s['valid']} "
-          f"{s['imu_yaw']:+8.2f} | {s['cmd_mode']:>3} {s['mode']:>2} {s['lock']:>2} {s['yaw_cmd']:+8.2f} | "
-          f"{s['angle']:+8.2f} {s['target']:+8.2f} {s['current']:+6.3f} | "
-          f"{feedback_age(s):>3} {s['state']:>2}  {s['fault']:02X} | {s['tec']:>3} {s['lec']:>3}"
-          + ("  BUS-OFF" if s["boff"] else ""), flush=True)
+    print(f"{s['tick']:>8} | {temp['actual']:5.1f} {s['cal']:>5} {s['valid']} {s['imu_yaw']:+7.2f} {s['imu_pitch']:+7.2f} | "
+          f"{s['cmd_mode']:>3} {s['mode']:>2} {s['lock']:>2} {chassis_sent(s):>2} | "
+          f"{axis_cells(s, s)} | {axis_cells(s, s['pitch'])} | "
+          f"{s['tec']:>3} {s['lec']:>3}" + ("  BUS-OFF" if s["boff"] else ""), flush=True)
 
 
 def hints(s, const):
@@ -361,8 +409,8 @@ def hints(s, const):
     samples, band, heat_timeout, offline = const["samples"], const["band"], const["heat_timeout"], const["offline"]
 
     if s["ins_status"] != 0:
-        out.append(f"BMI088 初始化失败（{BMI088_NAMES.get(s['ins_status'], s['ins_status'])}），IMU 用不了："
-                   "模式 3 下电机停在原地，模式 2 进不去。复位一次，还不行查 SPI。")
+        out.append(f"BMI088 初始化失败（{BMI088_NAMES.get(s['ins_status'], s['ins_status'])}），IMU 用不了，"
+                   "模式 2 进不去。复位一次，还不行查 SPI。")
     elif not s["valid"]:
         if samples is not None and s["cal"] >= samples:
             out.append(f"ins 标定完了，但 valid 是 0：{tick_age(s, s['ins_last'])} ms 没有新样本（SPI / DMA 出错？）")
@@ -370,33 +418,54 @@ def hints(s, const):
               and (heat_timeout is None or s["tick"] < heat_timeout)):
             wait = "" if heat_timeout is None else f"；只插 USB 时加热没电，要等到上电 {heat_timeout / 1000:.0f} s 才不管温度直接标定"
             out.append(f"ins 在等温度：{temp['actual']:.2f} ℃，目标 {temp['target']:.1f} ℃，进到 ±{band:g} ℃ 以内才开始标定"
-                       f"（要接 24 V 才加热{wait}）。C 板别动。")
+                       f"（要接 24 V 才加热{wait}）。C 板别动（装在车上时整车别动）。")
         else:
             total = "" if samples is None else f" / {samples:.0f}"
-            out.append(f"ins 在标定：{s['cal']}{total}，C 板别动。")
+            out.append(f"ins 在标定：{s['cal']}{total}，C 板别动（装在车上时整车别动）。")
 
     limit = 100 if offline is None else offline
-    if s["fb_tick"] == 0 or tick_age(s, s["fb_tick"]) > limit:
+    silent = [(name, a) for name, a in axes(s) if a["fb_tick"] == 0 or tick_age(s, a["fb_tick"]) > limit]
+    if silent:
+        who = "、".join(name for name, _ in silent)
         if s["tec"] >= 128 or s["boff"] or s["lec"] in (4, 5):
-            out.append("yaw 电机没回话，CAN1 发不出去（TEC 大 / 位错误）：查 C 板有没有 24 V 或 USB"
+            out.append(f"{who} 电机没回话，CAN1 发不出去（TEC 大 / 位错误）：查 C 板有没有 24 V 或 USB"
                        "（只接 DAPLink 时收发器没有 5 V）、CAN 线。")
         elif s["lec"] == 3:
-            out.append("yaw 电机没回话，发出去的帧没人应答：查电机有没有电、CANH / CANL 有没有接反。")
+            out.append(f"{who} 电机没回话，发出去的帧没人应答：查电机有没有电、CANH / CANL 有没有接反。")
         else:
-            out.append(f"yaw 电机没回话，但帧发出去了、有人应答：查电机 ID（程序里是 {s['motor_id']}，"
-                       "gimbal_config.h 的 GIMBAL_YAW_CAN_ID）、是不是在私有协议（RS05_test 的 scan 能查）。"
-                       "和 C 板一起上电时，RS05 约 1.4 s 内不回话。")
-    if s["fault"]:
-        out.append("yaw 电机报故障，算掉线，云台会锁住。这一版不清故障，给电机断电重启。")
+            ids = "、".join(f"{name} {a['motor_id']}（GIMBAL_{name.upper()}_CAN_ID）" for name, a in silent)
+            out.append(f"{who} 电机没回话，但帧发出去了、有人应答：查电机 ID（程序里是 {ids}）、"
+                       "是不是在私有协议（RS05_test 的 scan 能查）。和 C 板一起上电时，RS05 约 1.4 s 内不回话。")
+    for name, a in axes(s):
+        if a["fault"]:
+            out.append(f"{name} 电机报故障，算掉线，云台会锁住。这一版不清故障，给电机断电重启。")
     if s["lock"]:
-        out.append("云台锁在 RELAX：闭环时 yaw 电机掉过线，或者模式 2 时 IMU 无效。先 set mode 0，再切回去。")
-    if s["cmd_mode"] == 2:
-        out.append("模式 2 用 C 板的角度做反馈，C 板要装在电机转盘上；C 板拿在手里时电机会一直加速，马上 set mode 0。")
-    if s["cmd_mode"] == 3 and not s["valid"]:
-        out.append("模式 3：C 板 yaw 还没标定好，电机先停在原地。")
-    if s["cmd_mode"] > 3:
-        out.append(f"gimbal_mode = {s['cmd_mode']} 不是 0~3，云台当无力处理。")
+        out.append("云台锁在 RELAX：闭环时有电机掉过线（yaw、pitch 都在线才算在线），或者模式 2 时 IMU 无效。"
+                   "先 set mode 0，再切回去。")
+    zero = [name for name, a in axes(s) if a["zero_rad"] == 0.0]
+    if zero:
+        out.append(f"{'、'.join(zero)} 的中值还是占位的 0（gimbal_config.h 的 GIMBAL_*_ZERO_RAD）：第一次闭环以前，"
+                   "先在模式 0 下扶到正前方 / 水平，读下面的 position_rad 填进去。")
+    if s["cmd_mode"] > 2:
+        out.append(f"gimbal_mode = {s['cmd_mode']} 不是 0~2（测试用的模式 3 已经删了），改回 0~2。")
+    if chassis_sent(s) != s["chassis_cmd"]:
+        out.append(f"底盘指令是 {s['chassis_cmd']}（{CHASSIS_MODE_NAMES[s['chassis_cmd']]}），但云台实际不在模式 2，"
+                   "发给底盘的是 1（不跟随）：云台进了模式 2 自动恢复。")
     return out
+
+
+def print_axis(s, name, a):
+    print(f"{name} 轴：angle_deg {a['angle']:+.2f}  rate_dps {a['rate']:+.2f}  target_deg {a['target']:+.2f}"
+          f"（方向 {a['direction']:+d}，中值 {a['zero_rad']:.4f} rad，限位 {a['min_deg']:g} ~ {a['max_deg']:g}）")
+    for loop, pid, unit in (("角度环", a["angle_pid"], "°/s"), ("速度环（target 含前馈）", a["speed_pid"], "A")):
+        print(f"  {loop} Kp {pid['Kp']:g} Ki {pid['Ki']:g} Kd {pid['Kd']:g}：target {pid['target']:+.3f}  "
+              f"actual {pid['actual']:+.3f}  out {pid['out']:+.4f} {unit}（限幅 ±{pid['outMax']:g}）")
+    print(f"  发给电机的电流：{a['current']:+.3f} A（{POSITIVE[name]}为正；按电机自己的方向是 {a['iq']:+.3f} A）")
+    faults = [text for bit, text in enumerate(FAULT_BITS) if a["fault"] & (1 << bit)]
+    print(f"{name} 电机（RS05 ID {a['motor_id']}）：state {a['state']} {STATE_NAMES.get(a['state'], '?')}，"
+          f"fault 0x{a['fault']:02X} {'、'.join(faults) if faults else '无'}，反馈 {feedback_age(s, a)} ms 前"
+          f"{'（还没收到过）' if a['fb_tick'] == 0 else ''}，enable {a['enable']}，使能序列下一步 {a['enable_step']}")
+    print(f"  position_rad {a['pos']:+.4f}   velocity_rad_s {a['vel']:+.3f}")
 
 
 def print_full(s, const):
@@ -409,28 +478,25 @@ def print_full(s, const):
           f"标定 {s['cal']}{total}，valid {s['valid']}；最后一个样本 {tick_age(s, s['ins_last'])} ms 前")
     print(f"  C 板 yaw {s['imu_yaw']:+.2f}°  pitch {s['imu_pitch']:+.2f}°  "
           f"yaw 角速度 {s['imu_yaw_rate']:+.2f} °/s  pitch 角速度 {s['imu_pitch_rate']:+.2f} °/s")
-    print(f"指令（gimbal_test）：gimbal_mode {s['cmd_mode']} {MODE_NAMES.get(s['cmd_mode'], '（不认识，云台当无力）')}；"
-          f"yaw_deg {s['yaw_cmd']:+.2f}" + ("（模式 3 里是 电机角 − C 板 yaw）" if s["cmd_mode"] == 3 else ""))
+    print(f"指令（gimbal_test）：gimbal_mode {s['cmd_mode']} {MODE_NAMES.get(s['cmd_mode'], '（不认识）')}；"
+          f"yaw_deg {s['yaw_cmd']:+.2f}  pitch_deg {s['pitch_cmd']:+.2f}")
     print(f"云台：实际模式 {s['mode']} {MODE_NAMES.get(s['mode'], '?')}，"
           + ("锁住了（gimbal_fault 1）" if s["lock"] else "没锁"))
-    print(f"yaw 轴：angle_deg {s['angle']:+.2f}  rate_dps {s['rate']:+.2f}  target_deg {s['target']:+.2f}"
-          f"（方向 {s['direction']:+d}，中值 {s['zero_rad']:.4f} rad，限位 {s['min_deg']:g} ~ {s['max_deg']:g}）")
-    for name, pid, unit in (("角度环", s["angle_pid"], "°/s"), ("速度环（target 含前馈）", s["speed_pid"], "A")):
-        print(f"  {name} Kp {pid['Kp']:g} Ki {pid['Ki']:g} Kd {pid['Kd']:g}：target {pid['target']:+.3f}  "
-              f"actual {pid['actual']:+.3f}  out {pid['out']:+.4f} {unit}（限幅 ±{pid['outMax']:g}）")
-    print(f"  发给电机的电流：{s['current']:+.3f} A（俯视逆时针为正；按电机自己的方向是 {s['iq']:+.3f} A）")
-    faults = [name for bit, name in enumerate(FAULT_BITS) if s["fault"] & (1 << bit)]
-    print(f"yaw 电机（RS05 ID {s['motor_id']}）：state {s['state']} {STATE_NAMES.get(s['state'], '?')}，"
-          f"fault 0x{s['fault']:02X} {'、'.join(faults) if faults else '无'}，反馈 {feedback_age(s)} ms 前"
-          f"{'（还没收到过）' if s['fb_tick'] == 0 else ''}，enable {s['enable']}，使能序列下一步 {s['enable_step']}")
-    print(f"  position_rad {s['pos']:+.4f}   velocity_rad_s {s['vel']:+.3f}")
+    sent = chassis_sent(s)
+    print(f"底盘指令（gimbal_test）：chassis_mode {s['chassis_cmd']} "
+          f"{CHASSIS_MODE_NAMES.get(s['chassis_cmd'], '（不认识，底盘当无力）')}，"
+          f"发出去的是 {sent} {CHASSIS_MODE_NAMES.get(sent, '（底盘当无力）')}；"
+          f"vx {s['vx_cmd']:+.2f}  vy {s['vy_cmd']:+.2f} m/s（小陀螺转速在底盘的 chassis_config.h 里）")
+    for name, a in axes(s):
+        print_axis(s, name, a)
     for text in hints(s, const):
         print(f"提示：{text}")
 
 
 # ---------- 写 ----------
 
-USAGE = "命令：set mode <0~3>、set yaw <度>、add yaw <度>、set speed_kp <值>、set speed_ki <值>、set angle_kp <值>"
+USAGE = ("命令：set mode <0~2>、set yaw|pitch <度>、add yaw|pitch <度>、set speed_kp|speed_ki|angle_kp <值>（yaw）、"
+         "set pitch_speed_kp|pitch_speed_ki|pitch_angle_kp <值>、set chassis <0~3>")
 
 
 def parse_command(command):
@@ -438,11 +504,15 @@ def parse_command(command):
     if len(command) != 3 or command[0] not in ("set", "add") or command[1] not in WRITABLE:
         raise ValueError(USAGE)
     action, name, text = command
-    if action == "add" and name != "yaw":
-        raise ValueError("add 只能用在 yaw 上：add yaw <度>")
+    if action == "add" and name not in ("yaw", "pitch"):
+        raise ValueError("add 只能用在 yaw、pitch 上：add yaw <度>、add pitch <度>")
     if name == "mode":
+        if text not in ("0", "1", "2"):
+            raise ValueError("mode 是 0~2：0 无力 / 1 编码器闭环 / 2 IMU 闭环")
+        return name, False, int(text)
+    if name == "chassis":
         if text not in ("0", "1", "2", "3"):
-            raise ValueError("mode 是 0~3：0 无力 / 1 编码器闭环 / 2 IMU 闭环 / 3 yaw 跟着 C 板转")
+            raise ValueError("chassis 是 0~3：0 无力 / 1 不跟随 / 2 跟随 / 3 小陀螺")
         return name, False, int(text)
     try:
         value = float(text)
@@ -451,7 +521,7 @@ def parse_command(command):
     if not math.isfinite(value):
         raise ValueError(f"{name} 要是一个有限的数：{text}")
     if name.endswith(("_kp", "_ki")) and value < 0:
-        raise ValueError("增益不能是负的（方向由 gimbal_config.h 的 GIMBAL_YAW_DIRECTION 管）")
+        raise ValueError("增益不能是负的（方向由 gimbal_config.h 的 GIMBAL_YAW_DIRECTION、GIMBAL_PITCH_DIRECTION 管）")
     return name, action == "add", value
 
 
@@ -462,11 +532,33 @@ def read_stdin_line():
 
 
 def confirm_mode2():
-    print("模式 2 用 C 板的角度和角速度做反馈，C 板要装在电机转盘上、跟着电机一起转。\n"
-          "C 板拿在手里时，电机转了 C 板测不到，误差消不掉，电机会一直加速。")
+    print("模式 2（IMU 闭环）用 C 板的角度和角速度做反馈，C 板要装在云台上，跟着 yaw、pitch 一起转。\n"
+          "第一次进模式 2 以前，先在模式 0 下手转云台：yaw 俯视逆时针转、pitch 往上抬时，imu_y、imu_p 要和\n"
+          "yaw、pitch 一起变大。不一起变（C 板的朝向和 ins_config.h 的 INS_INSTALL_MATRIX 没对上），或者 C 板\n"
+          "没装在云台上，进模式 2 时环是反的或者开的，电机会一直加速。")
     print("确定切到模式 2？输入 y 回车：", end="", flush=True)
     answer = read_stdin_line()
     return answer is not None and answer.strip().lower() == "y"
+
+
+def confirm_chassis(value):
+    """底盘 1~3 都会让四个轮子闭环：方向错的轮子哪怕目标是 0 也会自己越转越快。"""
+    print(f"底盘切到 {value}（{CHASSIS_MODE_NAMES[value]}）：底盘的电机方向还没在车上核对过（chassis_config.h 里是推出来的"
+          "四个 -1），方向错的轮子一闭环就会自己越转越快。第一次先把底盘架空、轮子离地，看四个轮子转向对了再落地；\n"
+          "落地前确认周围没人、底盘板上没插线（小陀螺时会绕线）。要停：set chassis 0（立刻无力，滑着停）、"
+          "set chassis 1（按斜坡停下）。")
+    print("确定？输入 y 回车：", end="", flush=True)
+    answer = read_stdin_line()
+    return answer is not None and answer.strip().lower() == "y"
+
+
+def confirmed(command):
+    """要确认的命令先问；不用确认的直接 True。"""
+    if command == ("mode", False, 2):
+        return confirm_mode2()
+    if command[0] == "chassis" and command[2] != 0:
+        return confirm_chassis(command[2])
+    return True
 
 
 def start_command_reader(commands):
@@ -488,7 +580,7 @@ def start_command_reader(commands):
             except ValueError as e:
                 print(f"  （没执行：{e}；还能输入 once 打全部字段）", flush=True)
                 continue
-            if command == ("mode", False, 2) and not confirm_mode2():
+            if not confirmed(command):
                 print("  （没改）", flush=True)
                 continue
             commands.put(command)
@@ -499,10 +591,11 @@ def start_command_reader(commands):
 def write_value(ocd, symbols, s, const, name, add, value, full=True):
     symbol, offset, kind = WRITABLE[name]
     address = symbols[symbol][0] + offset
-    if name == "speed_ki":
+    if name.endswith("speed_ki"):
         # PID 在 Ki = 0 时积分照样在攒（I 项乘出来是 0，不限幅），直接改 Ki 会让 I 项一下顶到限幅、电机猛甩。
         # 原来 Ki 是 0（或改成 0）就把积分清零；都不是 0 就按比例缩放，Ki × 积分不变。先写积分、再写 Ki
-        old_ki, integral = s["speed_pid"]["Ki"], s["speed_pid"]["integral"]
+        pid = (s["pitch"] if symbol == "gimbal_pitch" else s)["speed_pid"]
+        old_ki, integral = pid["Ki"], pid["integral"]
         integral = 0.0 if (old_ki == 0.0 or value == 0.0) else integral * old_ki / value
         ocd.write(symbols[symbol][0] + AXIS_SPEED_PID_OFFSET + PID_INTEGRAL_OFFSET, 32,
                   [struct.unpack("<I", struct.pack("<f", integral))[0]])
@@ -510,13 +603,13 @@ def write_value(ocd, symbols, s, const, name, add, value, full=True):
         ocd.write(address, 8, [value])
     else:
         if add:
-            value += s["yaw_cmd"]
+            value += s[f"{name}_cmd"]
         ocd.write(address, 32, [struct.unpack("<I", struct.pack("<f", value))[0]])
     print(f"写进去了：{WRITABLE_NAMES[name]} = {value:g}")
-    if name == "yaw" and s["mode"] == 0:
-        print("注意：云台现在是无力（实际模式 0），改了 yaw_deg 也不动；切模式时它会被同步成当前角，这次改的会被覆盖。")
-    if name == "mode" and value == 3:
-        print("注意：模式 3 要 C 板拿在手里；C 板装在电机上时别用，目标会跟着电机跑、一直转下去。")
+    if name == "chassis" and value in (2, 3) and s["mode"] != 2:
+        print(f"注意：云台现在不在模式 2，发给底盘的是 1（不跟随）；云台进了模式 2 自动变成 {value}。")
+    if name in ("yaw", "pitch") and s["mode"] == 0:
+        print(f"注意：云台现在是无力（实际模式 0），改了 {name}_deg 也不动；切模式时它会被同步成当前角，这次改的会被覆盖。")
     if name.endswith(("_kp", "_ki")):
         print("注意：板子复位后回到 gimbal_config.h 里的值，调好了记得改进去。")
     if full:
@@ -534,7 +627,8 @@ def main():
     parser.add_argument("--port", type=int, default=6666, help="OpenOCD 的 TCL 端口")
     parser.add_argument("--period", type=float, default=0.2, help="一直读时每行间隔，秒")
     parser.add_argument("--once", action="store_true", help="读一次，打全部字段")
-    parser.add_argument("command", nargs="*", help="set mode|yaw|speed_kp|angle_kp <值>、add yaw <度>")
+    parser.add_argument("command", nargs="*", help="set mode|yaw|pitch|speed_kp|speed_ki|angle_kp|pitch_speed_kp|"
+                        "pitch_speed_ki|pitch_angle_kp|chassis <值>、add yaw|pitch <度>")
     # 固定 UTF-8：输出走管道（Git Bash 等）时 Python 默认用 GBK，中文会乱码。报错（sys.exit）走 stderr
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -546,7 +640,7 @@ def main():
             command = parse_command(args.command)
         except ValueError as e:
             parser.error(str(e))
-    if command == ("mode", False, 2) and not confirm_mode2():
+    if command is not None and not confirmed(command):
         sys.exit("没改。")
     symbols = find_symbols(args.elf)
     const = read_constants()

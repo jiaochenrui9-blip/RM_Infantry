@@ -30,6 +30,10 @@
 #define SIM_IQ_MAX_A        11.0f                       /* 最大相电流（峰值） */
 #define SIM_J_KGM2          0.005f                      /* 每个轴的转动惯量（假设值，和 GM6020 版一样） */
 #define SIM_FRICTION        0.005f                      /* 粘滞摩擦 N·m·s/rad，作用在相对底盘的转速上（轴承、滑环） */
+/* pitch 水平时的重力矩（N·m），Sim_Reset 的默认值。2026-11-12 车上实测（Gimbal_test_RS05/tools/pitch_gravity.py，
+   按 FF × cos 拟合 0.40 A）× Kt 0.67。gimbal_config.h 的重力前馈改成 0.40 以后，模型里重力还是 0 的话，
+   前馈就成了一直往上推的扰动，软限位、阶跃几个场景会冲过头 */
+#define SIM_PITCH_GRAVITY_NM 0.268f
 #define SIM_RAD_PER_DEG     0.0174532925f
 #define SIM_TWO_PI          6.28318531f
 #define SIM_POSITION_MAX    12.57f                      /* 手册类型 2 的角度范围，和驱动里的一样 */
@@ -377,6 +381,7 @@ void Sim_Reset(void)
 
     memset(&sim, 0, sizeof(sim));
     sim.trace = trace;
+    sim.pitch_gravity_nm = SIM_PITCH_GRAVITY_NM;
     /* 机械极限比 gimbal_config.h 的软限位各往外 5°。yaw 限位写满 360°（滑环）时没有机械极限 */
     if (SIM_YAW_UNLIMITED)
     {

@@ -223,8 +223,9 @@ void Gimbal_Update(uint32_t now_tick)
     Gimbal_AxisRead(&gimbal_yaw);
     Gimbal_AxisRead(&gimbal_pitch);
     /* 在线：100 ms 内回过反馈，并且没有故障位（欠压、过温、堵转过载等，见 rs05.h）。
-       单电机测试（2026-11-09）：pitch 电机还没装，先只看 yaw。装上 pitch 后改回 yaw、pitch 都要在线 */
-    Gimbal_UpdateMode(RS05_IsOnline(&gimbal_yaw.motor, now_tick, GIMBAL_OFFLINE_TIMEOUT_MS));
+       yaw、pitch 都在线才算：一个掉线整个云台无力 */
+    Gimbal_UpdateMode((RS05_IsOnline(&gimbal_yaw.motor, now_tick, GIMBAL_OFFLINE_TIMEOUT_MS) != 0U) &&
+                      (RS05_IsOnline(&gimbal_pitch.motor, now_tick, GIMBAL_OFFLINE_TIMEOUT_MS) != 0U));
 
     /* 两个闭环模式只是反馈不同：编码器模式用编码器角和电机转速，IMU 模式用 IMU 的对地角和角速度 */
     if (gimbal_mode == GIMBAL_MODE_ENCODER)

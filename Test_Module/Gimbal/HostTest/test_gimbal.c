@@ -433,6 +433,15 @@ static void Test_MotorOfflineLocks(void)
     Sim_Run(50U);
     CHECK(Sim_Mode() == GIMBAL_MODE_ENCODER, "给一次 RELAX 后应能重新闭环");
     INFO("掉线 → RELAX 锁定 → 上线后仍锁定 → 给 RELAX 后解锁");
+
+    /* 只掉 pitch 也一样：两个电机都在线才算在线（RS05 版单电机测试时临时只看 yaw，2026-11-10 改回） */
+    Sim_Run(300U);
+    sim.pitch.online = 0U;
+    Sim_Run(150U);
+    CHECK(Sim_Mode() == GIMBAL_MODE_RELAX, "pitch 掉线后也应进入 RELAX");
+    CHECK((sim.yaw.cmd_current == 0) && (sim.pitch.cmd_current == 0), "pitch 掉线后两个电机电流都应为 0");
+    sim.pitch.online = 1U;
+    INFO("只掉 pitch：同样 RELAX 锁定");
 }
 
 /* 小陀螺：yaw 不限位（滑环），底盘以 360°/s 一直转 3 s。云台对地不动，相对底盘的角转很多圈、
