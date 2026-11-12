@@ -1,8 +1,8 @@
 # F405_Project 笔记（底盘主控，队友打的 F405 板）
 
-> 和 `Test_Module/Chassis/Chassis_test`（C 板版）并列：CubeMX 这一层（.ioc、Core、启动文件、链接脚本）按这块板改，App 用 Chassis_test 的底盘代码。**现在 App 暂时换成了 M2006 上板测试**（2026-11-09），底盘代码不在这个工程里，恢复办法见「现在跑的：M2006 上板测试」。
+> 和 `Test_Module/Chassis/Chassis_test`（C 板版）并列：CubeMX 这一层（.ioc、Core、启动文件、链接脚本）按这块板改，App 用 Chassis_test 的底盘代码。**2026-11-11 起跑的是底盘程序**：底盘模块三个文件和 Chassis_test 一样，`robot.c` 按整车接线把两路 CAN 对调了（电机 CAN1、板间 CAN2），见「现在跑的：底盘程序」。中间（11-09~11-11）跑过 M2006、四个 M3508 的上板测试。
 > 底盘本身的进度、接口、上板步骤、容易错的地方都以 `Chassis_test/notes.md` 为准，这里只记这块板的硬件和与 C 板版不一样的地方。跨模块约定见 `RM_Infantry/notes.md`。
-> 最后更新：2026-11-09（同日后来去掉底盘逻辑，改成一个 M2006 的速度环测试。总线先是 CAN2，后改到 CAN1，最后电机经分电板接到 CAN2，又改回 CAN2）
+> 最后更新：2026-11-11 换全向轮（用户说车是全向轮、标了电调 ID 1 前右、2 后右、3 后左、4 前左；底盘模块的逆运动学按用户的写法改成驱动方向角表，config 改 ID、方向、R，和 Chassis_test 一起改、两边一样；robot.c 没动。ARM 0 警告，FLASH 21064 B / RAM 2952 B；主机检查换成新期望值 94 项全过；没上板。见「当前状态」最后一条，底盘本身的改动见 `Chassis_test/notes.md`）。2026-11-11 后来（整车电源改成一块电池在底盘，给云台和 yaw RS05 的电从这块板的 XT30 穿过去，记在「这块板的硬件」电源那一行和 README）。2026-11-11（用户让把底盘逻辑移植过来：App 换回 Chassis_test 的底盘代码，robot.c 对调两路 CAN；ARM 0 警告，FLASH 21108 B / RAM 2952 B；robot.c 主机检查 94 项全过；没上板。移植前工作区里没提交的四个 M3508 测试存进了 git stash，见「当前状态」最后一条）。2026-11-09（同日后来去掉底盘逻辑，改成一个 M2006 的速度环测试。总线先是 CAN2，后改到 CAN1，最后电机经分电板接到 CAN2，又改回 CAN2）
 
 ## 当前状态
 
@@ -12,8 +12,60 @@
 - 同日后来，用户让先去掉底盘逻辑，改成一个 M2006（ID 1）转到 500 的上板测试，见下一节。先写在 CAN2 上，用户随后让改到 CAN1；后来电机经分电板接到 CAN2，又改回 CAN2。用户自己改了 `DJI_MotorManager_Init` 那一行，Claude 补上了接收回调的 `&hcan2` 和 manager 的改名。ARM Debug 清理编译 0 警告：FLASH 14772 B，RAM 1904 B。
 - 2026-11-09 第一次上板：M2006 不转。OpenOCD 读下来软件和配置都对，两路 CAN 收发器既发不出去、也解不出帧。用户确认 24 V 和 TJA1044 的 5 V 都正常。后来用户拿电压表量 U3 的 STB 时电机转了，拿开就停。再用 MCU 逐个测芯片引脚：U3 的 8 脚（STB）没焊上，U4 的 1 脚（TXD）、4 脚（RXD）没焊上，软件不用改。用户重焊以后，CAN1 正常了，M2006 平均稳在 500 rpm（波动约 ±50，PID 还没调）；U4 还不行，像是地（2 脚和底部 EP）没接上，要再焊。U4 再焊后又测了一次：CAN2 测试帧报"没有应答"（LEC 3），U4 也正常了。中间有一次两路都不行，是 24 V 还没接上时测的。之后两路都正常，M2006 在 CAN1 上平均稳在 500 rpm（PID 还没调）。后来用户把 CAN2 接到分电板（上面接了电调），两路又都发不出去了。查下来是分电板那根线把这块板的 5 V 拉低了，拔掉线就恢复，两个收发器都正常；要先对好线序（最好不接 5 V 那根），再接分电板测 CAN2。详细记录见「上板记录」。
 - 原来的空工程备份在 `%TEMP%\f405_backup_original`，不在仓库里，临时目录清掉就没了。那只是 CubeMX 的空工程，随时能重新建。
+- 2026-11-11 移植底盘之前，工作区里有一版没提交的四个 M3508 测试（这份 notes 之前没记，是谁改的、有没有上板、结果怎样都没有记录）：
+  - `robot.c`：CAN1 上四个 M3508（C620 ID 1~4）都转到 500 转子 rpm，限幅 4000（约 4.9 A），PID 3 / 20 / 0；多了一个 `motor_tx_status_can1` 存 SendAll 的返回值。CMake 改编 `dji_m3508.c`。
+  - `.ioc` 两路 CAN 都打开了自动重发（`CAN1.NART`、`CAN2.NART` = ENABLE），`can.c` 跟着重新生成，只变了 `AutoRetransmission` 两行。
+  - 另加了一个没进 git 的 `README.md`，写的就是这个测试。
+- 2026-11-11 用户让把底盘逻辑移植过来：
+  - `App/` 的 `Infantry_Chassis.c/.h`、`chassis_config.h` 从 Chassis_test 原样拷来（`diff` 没有差别）；`robot.c` 也从那边拷来，再按整车接线对调两路 CAN（三处，见「和 Chassis_test 的区别」）。`robot.h` 两边本来就一样。
+  - `CMakeLists.txt` 用 Chassis_test 那份，改工程名、`SHARED_DIR` 两行。
+  - `.ioc` 和生成的代码没动，保留上面打开的自动重发（对底盘程序没坏处，见下一节）。
+  - ARM Debug 清理编译 0 警告，FLASH 21108 B、RAM 2952 B，和 11-09 刚复制底盘代码时一样（对调只换了参数）。主机检查 94 项全过（见「底盘版 robot.c 的主机检查」）。**没上板。**
+  - 覆盖四个 M3508 测试之前先存了一份：`git stash list` 里那条 "snapshot before F405 chassis port 2026-11-11"（stash commit `1dc61b8`）。它是用 `git stash create` + `git stash store` 存的当时所有没提交改动的快照，工作区没被动过。要取回测试：`git show 1dc61b8:F405_Project/App/robot.c`（CMakeLists.txt 同理）。别 `git stash pop` 它：里面还有别的工程当时没提交的改动，会和现在的文件冲突。
+  - `README.md`（没进 git）同日按用户要求改成了底盘程序的说明：CAN 分配、运行起来是什么样、文件、编译下载、调试器里看什么。原来那份测试说明没留底（stash 快照不含没进 git 的文件），要点都在上面"四个 M3508 测试"那条里。以后 CAN 分配、指令来源这类改了，README 也要跟着改。
+- 2026-11-11 换全向轮（用户发了整车照片、标了电调 ID；C 板在炮头，这块板装在底盘背面；滑环装好了、yaw 中值还没标）：
+  - 改的是底盘模块两个文件（`Infantry_Chassis.c`、`chassis_config.h`），和 Chassis_test 一起改，两边一样（`diff` 只差 robot.c）。改了什么、为什么那样定角度和方向，见 `Chassis_test/notes.md`「当前状态」最后一条。`robot.c`、.ioc、CMake 没动。
+  - 这块板上要知道的：电调 ID 1 前右、2 后右、3 后左、4 前左，`chassis_motors[0..3]`（前左、前右、后右、后左）对应 ID 4、1、2、3；方向先填 4 个 −1（推出来的，待核对）。
+  - ARM Debug 清理编译 0 警告：FLASH 21064 B、RAM 2952 B（比麦轮版少 44 B）。
+  - 主机检查（下面「底盘版 robot.c 的主机检查」那份）：原样跑新代码，94 项里 10 项失败，都是写死了麦轮配置的那几项（ID 和方向、1 m/s 的目标转速、0x200 的内容），过滤器、CAN 分配、超时、锁定都过。复制一份改成新期望值（`%TEMP%\f405_host_check_omni`，没进仓库），94 项全过：沿枪口 1 m/s 时目标 −1706 / 1706 / 1706 / −1706（前左、前右、后右、后左），0x200 四个槽位（ID 1~4）是 −3000 / −3000 / 3000 / 3000。同一份新检查换成 git 里的麦轮版底盘模块，10 项失败。
+  - yaw 中值没标之前，云台板发来的 `gimbal_yaw_rel_deg` 不是相对车头的角，平移方向会跟着偏，跟随也不对；先单独调底盘（`gimbal_yaw_rel_deg` 填 0）。**没上板。**
+- 2026-11-11 晚上：云台中值标好了（yaw 1:1），用户要试小陀螺。`CHASSIS_SPIN_DPS` 改成 36°/s（每个轮子约 300 转子 rpm，按用户说的 300 RPM），和 Chassis_test 一起改；ARM 0 警告，FLASH 21064 B / RAM 2952 B。这块板要重新烧（DAPLink 接 CN5，烧完再接回 C 板）。指令从云台板 `gimbal_watch.py` 的 `set chassis 3` 发，步骤见 `Chassis_test/notes.md`「上板步骤与验收」第 2 步。底盘方向还没核对，第一次架空。**还没烧、没转过。**
 
-## 现在跑的：M2006 上板测试（2026-11-09）
+## 现在跑的：底盘程序（2026-11-11）
+
+代码就是 Chassis_test 的底盘（接口、模式、计算顺序、参数见 `Chassis_test/notes.md`「接口」），只有两路 CAN 的分配按整车第一版接线（根目录 notes 第 4 节表下第一条）和 C 板版相反：
+
+| | 这块板 | C 板版 Chassis_test |
+|---|---|---|
+| 四个 M3508（C620 ID 1 前右、2 后右、3 后左、4 前左，2026-11-11 起） | CAN1：CN7 / CN15（2-pin，1 CANL、2 CANH），R10 板载终端 | CAN2 |
+| 板间指令 0x110（云台板 → 底盘板） | CAN2：CN8 / CN9（4-pin），R11 板载终端。整车上 CN8 经 CAN2 / RS05 总线分电板、过滑环到 C 板 CAN1，CN8 的 1 脚（5 V）空着 | CAN1 |
+| 大疆过滤器 / 0x110 过滤器 | CAN1 组 0 / CAN2 组 16 | CAN2 组 14 / CAN1 组 2 |
+
+- 上电默认 RELAX：CAN1 每 1 ms 发一帧全 0 的 0x200；CAN2 只收不发（这一路的 manager 没有电机，SendAll 什么也不发）。CAN2 上还有云台的两个 RS05，都是扩展帧，两个过滤器都不收；CAN2 的大疆过滤器（组 14）照样开着，这一路上没有大疆电机，收不到东西。
+- 指令只认 CAN2 来的 0x110：50 ms 没收到就 RELAX。云台板 `Gimbal_test_RS05` 每 1 ms 在它的 CAN1 上发（指令来自它的 test_cmd 调试变量）。云台主控上电要先发一段 RELAX：底盘电机还没反馈就收到运动模式会锁住，要再收到一次 RELAX 才解除。
+- 没有云台板时单独测底盘：`robot.c` 里临时把 `ChassisLink_GetCmd` 换成调试器改的 `volatile ChassisCmd_t`，或者用 USB-CAN 往 CN8 / CN9 发 0x110（格式见 `Shared/Link/chassis_link.h`）。
+- 自动重发：CAN1 上 0x200 比四个反馈（0x201~0x204）优先，不会输掉仲裁，只有出错或没人应答（电调没上电）时才重发；电调都没上电时第一帧一直在重发，后面两帧排在另外两个邮箱里，三个邮箱占满以后 SendAll 返回 HAL_BUSY（robot.c 忽略）；电调上电后先补发这三帧，它们是电机掉线时发的，底盘那时是 RELAX，都是 0。CAN2 这块板不发，没影响；以后加底盘 → 云台回传帧正好要它（根目录 notes 第 4 节）。
+- 调试器里看：`chassis_mode`、`chassis_fault`、斜坡后的 `chassis_vx_mps` / `chassis_vy_mps` / `chassis_wz_dps`、收到的指令 `chassis_cmd`（这几个在 `Infantry_Chassis.c`）；`chassis_motors[0..3]`（前左、前右、后右、后左，即 ID 4、1、2、3）的 `feedback_count`、`speed_rpm`、`speed.target_rpm`、`output_current`；板间最后一帧的时间 `chassis_link_tick`（`chassis_link.c`）。
+- 上板按 `Chassis_test/notes.md`「上板步骤与验收」做，那边第 1 步第 1 条的"4 个 C620 接 CAN2"在这块板上是 CAN1，`robot.c` 已经改好。
+
+### 底盘版 robot.c 的主机检查（2026-11-11）
+
+> 下面是麦轮配置时的结果（ID 按下标 1~4、方向 1 / −1 / −1 / 1、1 m/s 目标 2412）。换全向轮以后的结果见「当前状态」最后一条。
+
+测试代码在临时目录（`%TEMP%\f405_host_check`），没进仓库。编的是真代码：这块板的 `robot.c`、`Infantry_Chassis.c`，Shared 的 chassis_link、can_bus、DJI 驱动、motor_control、PID、user_math。假的只有 HAL：过滤器按 bxCAN 的规则判断一帧收不收（组号 < 14 归 CAN1），发出去的帧记下来。CLion 自带的 MinGW gcc，`-Wall -Wextra` 0 警告，94 项全过：
+
+- 初始化：两路 CAN 都启动、都开了 FIFO0 中断；只配了 3 个过滤器组：大疆 CAN1 组 0、CAN2 组 14，0x110 在 CAN2 组 16（16 位列表），CAN1 组 2 没配。四个电机都在 CAN1 的 manager 里（ID 1~4、反馈 0x201~0x204、0x200 槽位 0~3、方向 1 / −1 / −1 / 1、限幅 3000、失能），CAN2 的 manager 没有电机。
+- 上电没指令：RELAX，CAN1 每 1 ms 一帧全 0 的 0x200，CAN2 不发。
+- CAN1 上的电机反馈进底盘电机；同样的 0x201~0x204 出现在 CAN2 上，CAN2 的大疆过滤器收进来，但不算到底盘电机头上。扩展帧（RS05 的应答、指令）两路都不收。
+- CAN2 来 0x110（不跟随、沿枪口 1 m/s）：解出 vx 1.000，400 ms 后斜坡到 1 m/s，四个目标都是 2412 转子 rpm；假电机不转，速度环顶到限幅，0x200 里是 3000 / −3000 / −3000 / 3000（逻辑电流 × 方向）。CAN2 始终不发帧。
+- 同样的 0x110 改从 CAN1 来：CAN1 的过滤器挡掉；绕过过滤器硬塞进回调，`robot.c` 也不交给 chassis_link。CAN2 最后一帧后 45 ms 仍是不跟随，60 ms 时 RELAX、0x200 全 0。
+- CAN2 上先 RELAX 再不跟随能恢复；运动中后右（ID 3）停发反馈，约 100 ms 后锁住、0x200 全 0。
+- 反向对照：同一份测试换成 Chassis_test 的 `robot.c`（C 板版，没对调），69 项里 35 项失败（0x110 的过滤器配在 CAN1、电机注册在 CAN2、0x200 从 CAN2 发等），说明这些检查能分出 CAN 有没有接反。
+- 底盘模块本身（四种模式、斜坡、坐标变换、逆运动学、掉线锁定）没改，以 CarSim 和 `Chassis_test/notes.md` 里的测试为准；CarSim 编的是 Chassis_test 那份 `Infantry_Chassis.c`，和这边逐字节相同。
+
+## 以前跑的：M2006 上板测试（2026-11-09，11-11 已换成底盘程序）
+
+下面是当时的记录。要再跑这个测试，`robot.c` 和 `CMakeLists.txt` 从提交 `39c245d` 里取。注意那次提交里 `M2006_TEST_TARGET_RPM` 是 5000，不是下面表里的 500：注释"输出轴约 13.9 rpm"和下面的上板记录都是按 500 写的，什么时候改成 5000 的没有记录。
 
 用户要求：去掉 main 之前的逻辑，注册一个 M2006，ID 为 1，速度控制到 500。总线先说 CAN2，随后改成 CAN1；电机经分电板接到 CAN2 以后，又改回 CAN2。
 
@@ -64,35 +116,31 @@
 - 改到 CAN1 以后重跑了一遍，结果一样，0 个失败。
 - 改回 CAN2 以后又重跑了一遍：只启动了 CAN2，过滤器在 CAN2 的组 14，0x200 只从 CAN2 发，CAN1 的帧不处理。其余结果一样，0 个失败。
 
-恢复成底盘程序：
+恢复成底盘程序的办法原来写在这里（拷 Chassis_test 的 App 五个文件和 CMakeLists.txt），2026-11-11 已经按它做了，另外按整车接线对调了 CAN，见「现在跑的：底盘程序」。
 
-1. 把 `Test_Module/Chassis/Chassis_test/App` 的五个文件（robot.c、robot.h、Infantry_Chassis.c/.h、chassis_config.h）拷回 `App/`。
-2. 顶层 CMakeLists.txt 用 Chassis_test 的那份，改两处：工程名改成 `F405_Project`；`SHARED_DIR` 改成 `../Shared`。
-3. 用下面「两个工程怎么保持一致」的命令对一遍。.ioc 不用动。
-
-## 和 Chassis_test 的区别（底盘版时只有这些）
+## 和 Chassis_test 的区别
 
 | 文件 | 区别 |
 |---|---|
-| `F405_Project.ioc` | 芯片 STM32F405RGTx（LQFP64）。<br>HSE 8 MHz、PLLM 4（C 板 12 MHz、PLLM 6）；其余时钟一样：SYSCLK 168 MHz、APB1 42 MHz、APB2 84 MHz、PLLQ 4。<br>CAN 配置都一样：分频 3 / BS1 9 / BS2 4 = 1 Mbps，开自动离线恢复，不自动重发，RX0 中断优先级 0。<br>CAN1 引脚 PB8 RX / PB9 TX（C 板 PD0/PD1），CAN2 引脚 PB12 RX / PB13 TX（C 板 PB5/PB6）。<br>多了 PC1 `CAN1_STB`、PC2 `CAN2_STB` 两个推挽输出，初始低电平，见「上板前要知道的」第 1 条 |
-| 生成的代码 | `can.c` 只差引脚。<br>`gpio.c` 多了 STB 两个引脚，`main.h` 多了它们的宏。<br>`main.c` 只差 `PLLM = 4`。<br>`stm32f4xx_hal_conf.h` 的 `HSE_VALUE` 是 8000000。<br>启动文件、链接脚本、`STM32F405xx` 宏、`stm32f405xx.h` 换成 F405 的 |
+| `F405_Project.ioc` | 芯片 STM32F405RGTx（LQFP64）。<br>HSE 8 MHz、PLLM 4（C 板 12 MHz、PLLM 6）；其余时钟一样：SYSCLK 168 MHz、APB1 42 MHz、APB2 84 MHz、PLLQ 4。<br>CAN 配置：分频 3 / BS1 9 / BS2 4 = 1 Mbps，开自动离线恢复，RX0 中断优先级 0，这些一样；**两路都开了自动重发**（2026-11-11，Chassis_test 没开）。<br>CAN1 引脚 PB8 RX / PB9 TX（C 板 PD0/PD1），CAN2 引脚 PB12 RX / PB13 TX（C 板 PB5/PB6）。<br>多了 PC1 `CAN1_STB`、PC2 `CAN2_STB` 两个推挽输出，初始低电平，见「上板前要知道的」第 1 条 |
+| 生成的代码 | `can.c` 差引脚和 `AutoRetransmission`。<br>`gpio.c` 多了 STB 两个引脚，`main.h` 多了它们的宏。<br>`main.c` 只差 `PLLM = 4`。<br>`stm32f4xx_hal_conf.h` 的 `HSE_VALUE` 是 8000000。<br>启动文件、链接脚本、`STM32F405xx` 宏、`stm32f405xx.h` 换成 F405 的 |
+| `App/robot.c` | 两路 CAN 对调（2026-11-11，按整车接线）：`Infantry_Chassis_Init(&robot_can1)`（C 板版是 `robot_can2`）；`ChassisLink_Init(&hcan2)`（C 板版是 `hcan1`）；接收回调里 `ChassisLink_ProcessRxFrame` 在 CAN2 那一支（C 板版在 CAN1）。这三处的注释跟着改了 |
 | `CMakeLists.txt` | 工程名 `F405_Project`。工程在仓库根目录下一层，所以 `SHARED_DIR` 是 `../Shared`（Chassis_test 是 `../../../Shared`） |
 
-一样的部分：`App/` 五个文件（`diff -r` 没有差别）、其余 Core 文件、Drivers 的文件列表（只差芯片头文件）、`CMakePresets.json`。
-
-现在跑 M2006 测试，App 和 CMakeLists 的 `target_sources` 跟上表不一样：App 只有 robot.c、robot.h；CMake 不编 chassis_link、dji_m3508、user_math，改编 dji_m2006。.ioc 和生成的代码没变。
+一样的部分：`App/` 里 `robot.h` 和底盘模块三个文件（`Infantry_Chassis.c/.h`、`chassis_config.h`）、其余 Core 文件、Drivers 的文件列表（只差芯片头文件）、`CMakePresets.json`。
 
 ### 两个工程怎么保持一致
 
-两边不会自动同步。Chassis_test 的 App 或 .ioc 改了，这边要手动跟着改；反过来也一样，因为 CarSim（整车主机仿真）编的是 Chassis_test 的 App。现在这边是 M2006 测试，App 不用同步，恢复成底盘时直接拷最新的过来。底盘版时的对比方法：
+两边不会自动同步。
+- 底盘模块三个文件两边要一样：哪边改了，另一边跟着改。CarSim（整车主机仿真）编的是 Chassis_test 那份，所以改了要在 Chassis_test 里跑 CarSim。
+- `robot.c` 两边按各自的板子分 CAN，只有上表那三处不同。别的改动（比如以后换指令源、加模块）两边都要改，改完再对一遍。
+- .ioc 两边芯片不同，没法直接 diff；Chassis_test 加了外设，这边要按下面的引脚表在 CubeMX 里重新选引脚。
 
 ```bash
 cd /c/Project/RM_Infantry
-diff -r --strip-trailing-cr Test_Module/Chassis/Chassis_test/App F405_Project/App   # 应该没有输出
+diff -r --strip-trailing-cr Test_Module/Chassis/Chassis_test/App F405_Project/App   # 只有 robot.c 对调 CAN 的那几行
 diff --strip-trailing-cr Test_Module/Chassis/Chassis_test/CMakeLists.txt F405_Project/CMakeLists.txt   # 只差工程名和 SHARED_DIR 两行
 ```
-
-两边的 .ioc 芯片不同，没法直接 diff。Chassis_test 加了外设，这边要按下面的引脚表，在 CubeMX 里重新选引脚。
 
 ## 这块板的硬件（2026-11-09 按网表整理，还没对照实物）
 
@@ -109,7 +157,7 @@ diff --strip-trailing-cr Test_Module/Chassis/Chassis_test/CMakeLists.txt F405_Pr
 | 串口 | USART1：PA9 TX / PA10 RX → CN10。USART2：PA2 TX / PA3 RX → CN11。两个都是 GH 4P：1 接 MCU 的 RX、2 接 MCU 的 TX、3 GND、4 5V | 丝印上的编号以实物为准 |
 | RS485 ×2 | UART4（PA0 TX / PA1 RX）→ U8 SIT3088，RE#/DE 并在一起接 PC8，A/B 接 CN14 的 3、4 脚。USART6（PC6 TX / PC7 RX）→ U9 SIT3088，RE#/DE 接 PD2，A/B 接 CN13 | 收发器是 3.3 V 供电；DI、RO 各有 5.1 k 上拉；R15、R14 120 Ω 板载终端。CN13、CN14：1 5V、2 GND、3 A、4 B |
 | USB | Type-C，PA11 DM / PA12 DP；CC1、CC2 各 5.1 k 下拉 | **VBUS 没有接到板上任何地方** |
-| 电源 | 24 V（XT30：CN1、CN2 母座，CN4 公座，三个并联）→ U1 TPS54540 → 5 V → U7 SY8089 → 3.3 V；24 V 上并了 D1 SMBJ30CA（TVS 管） | 两个 TJA1044 的 VCC 和各插座的 5V 都来自这路 5 V，只能由 24 V 降压得到 |
+| 电源 | 24 V（XT30：CN1、CN2 母座，CN4 公座，三个并联）→ U1 TPS54540 → 5 V → U7 SY8089 → 3.3 V；24 V 上并了 D1 SMBJ30CA（TVS 管） | 两个 TJA1044 的 VCC 和各插座的 5V 都来自这路 5 V，只能由 24 V 降压得到。XT30 直接接 VCC_BAT / GND：没有保险丝、没有防反接、没有缓启动。整车第一版（2026-11-11）电池 → 3508 分电板 → 这块板（一个 XT30 进）→ 另一个 XT30 出 → CAN2 / RS05 总线分电板 → yaw RS05 和滑环，给云台、yaw 的电都从这块板穿过去（根目录 notes 第 4 节「滑环、电源」） |
 | 网表里只连到 MCU 的网络 | TIM3_CH1~4（PB4、PB5、PB0、PB1）、TIM12_CH1/2（PB14、PB15）、UART3_TX（PB10）、I2C3（PA8 SCL、PC9 SDA）、SPI3（PA15 CS、PC10 SCK、PC11 MISO、PC12 MOSI） | 起了网络名，但网表里没接到任何插座或器件。板上有没有做成焊盘，要看实物或 PCB |
 | 没接 | PC13、PC14、PC15、PC5、PB2、PB3、PB6、PB7；CN6（XT30）两个脚都没接 | |
 | 没有 | LED、蜂鸣器、用户按键、电池电压检测、IMU 加热 | 调试只能靠调试器看变量（以后可加 USB 虚拟串口） |
@@ -146,13 +194,15 @@ diff --strip-trailing-cr Test_Module/Chassis/Chassis_test/CMakeLists.txt F405_Pr
 
 1. 接 24 V 和 DAPLink，下载并运行。程序没停在 `Error_Handler`（HSE 起振失败会停在那里），`SystemCoreClock` 是 168000000。
 2. STB：PC1、PC2 是低电平。可以在调试器里看 `GPIOC->ODR` 的 bit1、bit2，也可以用万用表量 U3、U4 的 8 脚。
-3. CAN1：2026-11-09 用 M2006 测试验过了（那时程序用 CAN1，M2006 平均稳在 500 rpm）。
+3. CAN1（底盘电机）：收发 2026-11-09 用 M2006 测试验过（那时程序用 CAN1，M2006 平均稳在 500 rpm）。底盘程序：
    - 不接电机时每 1 ms 发一帧全 0 的 0x200；用 USB-CAN 接 CN7 或 CN15 能看到（USB-CAN 会应答）。
-   - 接上 M2006（C610 ID 1）后，`robot_m2006.feedback_count` 在涨，`speed_rpm` 稳在 500 附近。
+   - 接上四个 C620（ID 1 前右、2 后右、3 后左、4 前左）后，`chassis_motors[0..3].feedback_count` 都在涨；手转轮子，`speed_rpm` 跟着变（RELAX，电机不出力）。`chassis_motors[0..3]` 是前左、前右、后右、后左，即 ID 4、1、2、3。
    - `feedback_count` 不涨时依次查：24 V、PC1 是不是低电平（第 2 步）、CANH / CANL 有没有接反、电调 ID。
-4. CAN2：现在的 M2006 测试（程序已改回 CAN2）就验这一步。电机接 CN8 或 CN9（3 CANH、4 CANL、2 GND，1 脚 5 V 别接到分电板上）；判断方法同第 3 步，`feedback_count` 不涨时把 PC1 换成 PC2 查。
-5. 板间 CAN1（底盘版）：云台 C 板发 0x110，底盘板这边收到，见 Chassis_test/notes.md「上板步骤与验收」第 3 步、Gimbal_test/notes.md「板间通信」的验收。两块板的 CAN1 都是 2-pin、线序一样（1 CANL、2 CANH），两头的板载 120 Ω 正好当两个终端。
-6. 接电机以后按 Chassis_test/notes.md「上板步骤与验收」做。
+4. CAN2（板间）：云台 C 板发 0x110，这块板收到，见 Chassis_test/notes.md「上板步骤与验收」第 3 步、Gimbal_test/notes.md「板间通信」的验收。整车上走 CN8 → CAN2 / RS05 总线分电板 → 滑环 → C 板 CAN1，只接 2 GND、3 CANH、4 CANL，1 脚（5 V）空着（根目录 notes 第 4 节「走线」）。
+   - 收到了：`chassis_link_tick` 跟着 HAL tick 走，`chassis_cmd` 跟着云台板的指令变。
+   - 收不到时依次查：PC2 是不是低电平、CN8 的线序、滑环里的 CANH、CANL；断电量 CANH–CANL 应约 60 Ω。云台没电时（滑环的 XT 没接好）C 板不发，也收不到。
+   - CAN2 重焊后只验过往空总线上发（LEC 3），这是它第一次真收。
+5. 接电机以后按 Chassis_test/notes.md「上板步骤与验收」做（那边写的"接 CAN2"在这块板上是 CAN1）。
 
 ## 上板记录
 

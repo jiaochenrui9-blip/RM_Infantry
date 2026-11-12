@@ -14,6 +14,7 @@
 
 #include "car_sim.h"
 #include "chassis_config.h"
+#include "dji_m3508.h"
 #include "gimbal_test_cmd.h"
 #include "user_math.h"
 
@@ -270,7 +271,10 @@ static void Test_SpinDrive(void)
 
 /* 小陀螺 + 高速平移：轮速超过 CHASSIS_WHEEL_MAX_RPM，4 个轮子要等比例缩小。
    等比例缩小保证的是“平移 : 旋转”的比例和方向都不变，只是一起变慢；
-   只削超的那个轮子的话，主要是旋转被砍得多（比例变了），方向也会歪一点 */
+   只削超的那个轮子的话，主要是旋转被砍得多（比例变了），方向也会歪一点。
+   平移速度按配置算，要车转到哪个角度都超：全向轮平移投影到驱动方向最少 √2/2 倍，加上 R × 小陀螺转速，
+   要大于转速上限对应的轮速，再多给 20%。只偶尔超一点的话，只削超的那个轮子查不出来（2026-11-11 换全向轮时试过）。
+   原来写死 4 m/s（小陀螺 180°/s 时够），小陀螺改成 36°/s 以后不够，场景自己报没测到，所以改成算的 */
 static void Test_SpinFastSaturated(void)
 {
     float dir_max = 0.0f;
@@ -279,7 +283,11 @@ static void Test_SpinFastSaturated(void)
     float wz_min = 1.0e9f;
     float wz_max = -1.0e9f;
     float ratio_err = 0.0f;
-    const float cmd_ratio = 3.0f / CHASSIS_SPIN_DPS;   /* 指令的 平移速度 / 旋转速度 */
+    const float wheel_max_mps = CHASSIS_WHEEL_MAX_RPM * 2.0f * 3.14159265f * CHASSIS_WHEEL_RADIUS_M
+                              / (60.0f * DJI_M3508_REDUCTION_RATIO);
+    const float v_cmd = 1.2f * (wheel_max_mps - CHASSIS_ROTATE_RADIUS_M * CHASSIS_SPIN_DPS * 0.0174532925f)
+                      / 0.70710678f;                     /* 按 W 的速度 m/s */
+    const float cmd_ratio = v_cmd / CHASSIS_SPIN_DPS;   /* 指令的 平移速度 / 旋转速度 */
     uint32_t i;
 
     if (!CAR_YAW_UNLIMITED)
@@ -291,7 +299,7 @@ static void Test_SpinFastSaturated(void)
     Car_Reset();
     SetGimbalMode(GIMBAL_MODE_IMU);
     gimbal_test.chassis_mode = CHASSIS_MODE_SPIN;
-    gimbal_test.vx_mps = 3.0f;
+    gimbal_test.vx_mps = v_cmd;
     Car_Run(3000U);
     for (i = 0U; i < 2000U; i++)
     {
@@ -301,17 +309,19 @@ static void Test_SpinFastSaturated(void)
         speed_max = fmaxf(speed_max, Car_Speed());
         wz_min = fminf(wz_min, car.chassis.wz_dps);
         wz_max = fmaxf(wz_max, car.chassis.wz_dps);
-        if (car.chassis.wz_dps > 10.0f)
+        if (car.chassis.wz_dps > 0.2f * CHASSIS_SPIN_DPS)      /* 转速太小时比例的分母接近 0，不算 */
         {
             ratio_err = fmaxf(ratio_err, fabsf(Car_Speed() / car.chassis.wz_dps / cmd_ratio - 1.0f));
         }
     }
-    INFO("小陀螺 + 按 W 3 m/s（轮速超 %.0f rpm 上限）：速度 %.2f~%.2f m/s，转速 %.0f~%.0f °/s，"
+    INFO("小陀螺 + 按 W %.1f m/s（轮速超 %.0f rpm 上限）：速度 %.2f~%.2f m/s，转速 %.0f~%.0f °/s，"
          "平移 / 旋转 和指令的比例最多差 %.1f%%，方向最大偏 %.2f°",
-         (double)CHASSIS_WHEEL_MAX_RPM, speed_min, speed_max, wz_min, wz_max, ratio_err * 100.0f, dir_max);
+         v_cmd, (double)CHASSIS_WHEEL_MAX_RPM, speed_min, speed_max, wz_min, wz_max, ratio_err * 100.0f, dir_max);
+    /* 小陀螺转速低时，只削超的那个轮子会先把旋转削没（36°/s 时转速掉到 0），上面的比例一个样本都不算，要单独查 */
+    CHECK(wz_min > 0.3f * CHASSIS_SPIN_DPS, "小陀螺转速被削没了（4 个轮子没有等比例缩小？）");
     CHECK(ratio_err < 0.25f, "平移和旋转没有按同一比例缩小（4 个轮子没有等比例缩小？）");
     CHECK(dir_max < 10.0f, "超速缩放后平移方向偏太多");
-    CHECK(speed_max < 3.0f, "应该真的超了上限、被缩小（场景本身没测到想测的）");
+    CHECK(speed_max < v_cmd, "应该真的超了上限、被缩小（场景本身没测到想测的）");
 }
 
 /* 云台在编码器模式下要跟随：云台板降成不跟随，底盘不会一直转（不降级的话会以 跟随Kp × 相对角 一直转） */
@@ -335,7 +345,9 @@ static void Test_FollowNeedsImu(void)
     CHECK(wz_max < 1.0f, "底盘不该一直转");
 }
 
-/* 板间断线：约 50 ms 后底盘无力（滑行）；接回后自动恢复（断线不锁定），加速度受斜坡限制 */
+/* 板间断线：约 50 ms 后底盘无力（滑行）；接回后自动恢复（断线不锁定），加速度受斜坡限制。
+   接回时斜坡从 0 开始，车还在滑，先刹到约 0.9 m/s 再加速。全向轮在电流限幅 3000 时模型里最大加速度约 2 m/s²，
+   跟不上 3 m/s² 的斜坡，速度环积分攒起来，会冲到约 1.55 再回落，所以看 1.5 s 后（2026-11-11 换全向轮时改，原来 1 s） */
 static void Test_LinkLoss(void)
 {
     uint32_t relax_ms = 0U;
@@ -366,13 +378,13 @@ static void Test_LinkLoss(void)
     Car_Run(5U);
     speed_reconnect = Car_Speed();
     speed_prev = speed_reconnect;
-    for (i = 0U; i < 1000U; i++)
+    for (i = 0U; i < 1500U; i++)
     {
         Car_Run(1U);
         accel_max = fmaxf(accel_max, fabsf(Car_Speed() - speed_prev) / 0.001f);
         speed_prev = Car_Speed();
     }
-    INFO("接回：mode %d，1 s 后 %.2f m/s（接回时 %.2f），最大加速度 %.2f m/s²（斜坡 %.1f）",
+    INFO("接回：mode %d，1.5 s 后 %.2f m/s（接回时 %.2f），最大加速度 %.2f m/s²（斜坡 %.1f）",
          (int)RxMode(), Car_Speed(), speed_reconnect, accel_max, (double)CHASSIS_ACCEL_MPS2);
     CHECK(RxMode() == CHASSIS_MODE_NO_FOLLOW, "接回后应自动回到运动模式");
     CHECK(fabsf(Car_Speed() - 1.5f) < 0.05f, "接回后应恢复到指令速度");

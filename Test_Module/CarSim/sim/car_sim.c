@@ -53,9 +53,9 @@ static float car_rotor_rev[4];                 /* 4 个 M3508 转子累计圈数
 
 static const uint8_t car_wheel_esc_id[4] = {CHASSIS_FL_ESC_ID, CHASSIS_FR_ESC_ID, CHASSIS_BR_ESC_ID, CHASSIS_BL_ESC_ID};
 static const int8_t car_wheel_dir[4] = {CHASSIS_FL_DIRECTION, CHASSIS_FR_DIRECTION, CHASSIS_BR_DIRECTION, CHASSIS_BL_DIRECTION};
-/* 轮速 = vx + J_VY·vy + J_W·R·wz（底盘系；麦轮再乘 XY_FACTOR）：和 Infantry_Chassis.c 的逆运动学同一组符号 */
-static const float car_j_vy[4] = {-1.0f, 1.0f, -1.0f, 1.0f};
-static const float car_j_w[4] = {-1.0f, 1.0f, 1.0f, -1.0f};
+/* 4 个全向轮装在四角、轮轴指向车中心。驱动方向角从车头往左量（俯视逆时针），逻辑正转推车体逆时针转。
+   模型按车的装法自己存一份（度），不用 Infantry_Chassis.c 里那张表，表写错了这里才查得出来 */
+static const float car_wheel_theta_deg[4] = {135.0f, 45.0f, 315.0f, 225.0f};   /* 前左、前右、后右、后左 */
 
 uint32_t HAL_GetTick(void)
 {
@@ -67,7 +67,7 @@ uint32_t Car_Tick(void)
     return car_tick;
 }
 
-/* 4 个轮子的线速度（往让车前进的方向滚为正） */
+/* 4 个轮子沿驱动方向的线速度（逻辑方向：推车体逆时针转为正）= J·[vx, vy, wz] */
 static void Car_WheelSpeeds(float v[4])
 {
     const CarChassis_t *c = &car.chassis;
@@ -76,7 +76,9 @@ static void Car_WheelSpeeds(float v[4])
 
     for (i = 0U; i < 4U; i++)
     {
-        v[i] = CHASSIS_XY_FACTOR * (c->vx_mps + car_j_vy[i] * c->vy_mps) + car_j_w[i] * CHASSIS_ROTATE_RADIUS_M * wz_rad;
+        float theta = car_wheel_theta_deg[i] * CAR_RAD_PER_DEG;
+
+        v[i] = cosf(theta) * c->vx_mps + sinf(theta) * c->vy_mps + CHASSIS_ROTATE_RADIUS_M * wz_rad;
     }
 }
 
@@ -245,11 +247,13 @@ static void Car_ChassisStep(float dt)
     {
         /* 掉线的电调收不到控制帧也照样会停；这里当作掉线就不出力 */
         float amps = (c->wheel_online[i] != 0U) ? (float)c->wheel_current[i] * CAR_C620_A_PER_CMD : 0.0f;
+        float theta = car_wheel_theta_deg[i] * CAR_RAD_PER_DEG;
 
+        /* 每个轮子沿驱动方向出力，经 Jᵀ 合成：fx、fy 是力的分量，mz = 旋转半径 × 力 */
         force = (float)car_wheel_dir[i] * amps * CAR_M3508_KT_OUT / CHASSIS_WHEEL_RADIUS_M - CAR_WHEEL_DAMPING * v[i];
-        fx += CHASSIS_XY_FACTOR * force;
-        fy += CHASSIS_XY_FACTOR * car_j_vy[i] * force;
-        mz += car_j_w[i] * CHASSIS_ROTATE_RADIUS_M * force;
+        fx += cosf(theta) * force;
+        fy += sinf(theta) * force;
+        mz += CHASSIS_ROTATE_RADIUS_M * force;
         car_rotor_rev[i] += (float)car_wheel_dir[i] * v[i] / (CAR_TWO_PI * CHASSIS_WHEEL_RADIUS_M) * DJI_M3508_REDUCTION_RATIO * dt;
     }
 
@@ -461,7 +465,7 @@ uint8_t Car_WheelsFighting(void)
     Car_WheelSpeeds(v);
     for (i = 0U; i < 4U; i++)
     {
-        /* 换算成“让车前进为正”的电流，和轮子转动方向比 */
+        /* 换算成逻辑方向（推车体逆时针转为正）的电流，和轮子转动方向比 */
         int current = car_wheel_dir[i] * car.chassis.wheel_current[i];
 
         if ((fabsf(v[i]) < CAR_FIGHT_MIN_SPEED_MPS) || (abs(current) < CAR_FIGHT_MIN_CURRENT))

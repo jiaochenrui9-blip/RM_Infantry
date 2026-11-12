@@ -32,7 +32,9 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 enable_language(C ASM)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME}
+    App/Infantry_Chassis.c
+    App/Infantry_Chassis.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -50,15 +52,17 @@ endif()
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # 本工程的应用层：装配层（现在是 M2006 上板测试，底盘代码见 notes.md）
+    # 本工程的应用层：装配层（底盘模块的文件在上面 add_executable 里）
     App/robot.c
 
-    # M2006 测试用到的公共代码：M2006 驱动、电机层速度环、PID、CAN
+    # 底盘 v1 用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅
+    ${SHARED_DIR}/Link/chassis_link.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor_manager.c
-    ${SHARED_DIR}/Devices/DJI_Driver/dji_m2006.c
+    ${SHARED_DIR}/Devices/DJI_Driver/dji_m3508.c
     ${SHARED_DIR}/Devices/DJI_Driver/motor_control.c
     ${SHARED_DIR}/Algorithm/PID.c
+    ${SHARED_DIR}/Algorithm/user_math.c
     ${SHARED_DIR}/BSP/can_bus.c
 )
 
@@ -66,6 +70,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
 
+    ${SHARED_DIR}/Link
     ${SHARED_DIR}/Devices/DJI_Driver
     ${SHARED_DIR}/Algorithm
     ${SHARED_DIR}/BSP

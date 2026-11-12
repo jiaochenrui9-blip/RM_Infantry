@@ -27,6 +27,16 @@ enum
     CHASSIS_MOTOR_NUM
 };
 
+/* 各轮驱动方向角（全向轮装在四角、轮轴指向车中心）：从 vx（车头）往 vy（左）量，即俯视逆时针；
+   正转时推动车体俯视逆时针转，和 wz 同向。坐标和 chassis_link 一样是 x 前、y 左，
+   所以和 ELRS 那份 Omni_Remote.c（vx 向右、wz 顺时针）的角度不同 */
+static const float chassis_wheel_theta[CHASSIS_MOTOR_NUM] = {
+    2.356194f,  /* 135° 前左 */
+    0.785398f,  /* 45°  前右 */
+    5.497787f,  /* 315° 后右 */
+    3.926991f   /* 225° 后左 */
+};
+
 static ChassisCmd_t chassis_cmd;                        /* Chassis_SetCmd 拷进来的指令 */
 static DJI_Motor_t chassis_motors[CHASSIS_MOTOR_NUM];   /* 4 个底盘电机，按顺时针从前左开始编号：0~3。 */
 
@@ -168,28 +178,23 @@ static void Chassis_Ramp(float wz_target_dps)
     chassis_wz_dps += Math_Clamp(wz_target_dps - chassis_wz_dps, -wz_step, wz_step);
 }
 
-/* 逆运动学：底盘坐标系的 vx、vy（m/s）和 wz（度/秒）→ 4 个目标转子转速。
-   轮速正 = 这个轮子往让底盘前进的方向滚。麦轮和全向轮符号规律一样，只差 chassis_config.h 里的两个系数。 */
+/* 逆运动学（全向轮）：底盘坐标系的 vx、vy（m/s）和 wz（度/秒）→ 4 个目标转子转速，乘方向之前的逻辑方向。 */
 static void Chassis_WheelRpm(float vx, float vy, float wz_dps, float rpm[CHASSIS_MOTOR_NUM])
 {
-    float xy_fl_br = CHASSIS_XY_FACTOR * (vx - vy);     /* 前左、后右两个轮的平移分量 */
-    float xy_fr_bl = CHASSIS_XY_FACTOR * (vx + vy);     /* 前右、后左两个轮的平移分量 */
-    float w = CHASSIS_ROTATE_RADIUS_M * wz_dps * CHASSIS_RAD_PER_DEG;  /* 旋转分量：逆时针转时左侧往后、右侧往前 */
+    float w = CHASSIS_ROTATE_RADIUS_M * wz_dps * CHASSIS_RAD_PER_DEG;  /* 旋转带来的轮速 = 半径 × 角速度 */
     float max_rpm = 0.0f;
 
-    rpm[CHASSIS_FL] = (xy_fl_br - w) * CHASSIS_MPS_TO_RPM;
-    rpm[CHASSIS_FR] = (xy_fr_bl + w) * CHASSIS_MPS_TO_RPM;
-    rpm[CHASSIS_BR] = (xy_fl_br + w) * CHASSIS_MPS_TO_RPM;
-    rpm[CHASSIS_BL] = (xy_fr_bl - w) * CHASSIS_MPS_TO_RPM;
-
-    /* 任一个超过上限就 4 个一起等比例缩小，合成运动方向不变（小陀螺加平移时很容易超） */
     for (uint8_t i = 0U; i < CHASSIS_MOTOR_NUM; i++)
     {
+        /* 平移速度投影到驱动方向，加上旋转带来的轮速 */
+        rpm[i] = (cosf(chassis_wheel_theta[i]) * vx + sinf(chassis_wheel_theta[i]) * vy + w) * CHASSIS_MPS_TO_RPM;
         if (fabsf(rpm[i]) > max_rpm)
         {
             max_rpm = fabsf(rpm[i]);
         }
     }
+
+    /* 任一个超过上限就 4 个一起等比例缩小，合成运动方向不变（小陀螺加平移时很容易超） */
     if (max_rpm > CHASSIS_WHEEL_MAX_RPM)
     {
         for (uint8_t i = 0U; i < CHASSIS_MOTOR_NUM; i++)
