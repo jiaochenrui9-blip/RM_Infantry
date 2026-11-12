@@ -16,3 +16,6 @@ compile_commands.json
 
 # Local historical backups
 Test_Module/Gimbal/Backup/
+
+# Python bytecode caches (tools/*.py)
+__pycache__/

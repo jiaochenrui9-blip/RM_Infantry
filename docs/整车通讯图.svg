@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="800" viewBox="0 0 1500 800"
+     font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Source Han Sans SC',sans-serif">
+  <title>RM_Infantry 整车通讯图（第一版：F405 底盘主控 + C 板云台主控）</title>
+
+  <rect width="1500" height="800" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text x="40" y="46" font-size="24" font-weight="bold" fill="#0f172a">整车通讯图（第一版：F405 底盘主控 + C 板云台主控）</text>
+  <text x="40" y="72" font-size="13" fill="#64748b">两路 CAN 都是 1 Mbps。按 notes.md 第 4 节和两个工程的代码画（2026-11-11）；虚线是还没写或还没接的。</text>
+
+  <!-- 区域 -->
+  <rect x="30" y="95" width="765" height="570" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
+  <text x="50" y="126" font-size="18" font-weight="bold" fill="#334155">底盘</text>
+
+  <rect x="805" y="95" width="56" height="570" rx="10" fill="#fef9c3" stroke="#eab308"/>
+  <text x="833" y="128" font-size="15" font-weight="bold" fill="#854d0e" text-anchor="middle">滑</text>
+  <text x="833" y="148" font-size="15" font-weight="bold" fill="#854d0e" text-anchor="middle">环</text>
+
+  <rect x="871" y="95" width="599" height="570" rx="14" fill="#faf5ff" stroke="#d8b4fe" stroke-dasharray="6 4"/>
+  <text x="891" y="126" font-size="18" font-weight="bold" fill="#6b21a8">云台</text>
+
+  <!-- ===== CAN1：F405 ↔ 4 个 C620 ===== -->
+  <line x1="181" y1="215" x2="730.5" y2="215" stroke="#2563eb" stroke-width="4" stroke-linecap="round"/>
+  <line x1="181" y1="310" x2="181" y2="215" stroke="#2563eb" stroke-width="4" stroke-linecap="round"/>
+  <line x1="382.5" y1="215" x2="382.5" y2="180" stroke="#2563eb" stroke-width="3"/>
+  <line x1="498.5" y1="215" x2="498.5" y2="180" stroke="#2563eb" stroke-width="3"/>
+  <line x1="614.5" y1="215" x2="614.5" y2="180" stroke="#2563eb" stroke-width="3"/>
+  <line x1="730.5" y1="215" x2="730.5" y2="180" stroke="#2563eb" stroke-width="3"/>
+
+  <rect x="330" y="120" width="105" height="60" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="382.5" y="145" font-size="13" font-weight="bold" fill="#14532d" text-anchor="middle">C620 ID1</text>
+  <text x="382.5" y="167" font-size="12" fill="#334155" text-anchor="middle">前左 · M3508</text>
+  <rect x="446" y="120" width="105" height="60" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="498.5" y="145" font-size="13" font-weight="bold" fill="#14532d" text-anchor="middle">C620 ID2</text>
+  <text x="498.5" y="167" font-size="12" fill="#334155" text-anchor="middle">前右 · M3508</text>
+  <rect x="562" y="120" width="105" height="60" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="614.5" y="145" font-size="13" font-weight="bold" fill="#14532d" text-anchor="middle">C620 ID3</text>
+  <text x="614.5" y="167" font-size="12" fill="#334155" text-anchor="middle">后右 · M3508</text>
+  <rect x="678" y="120" width="105" height="60" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="730.5" y="145" font-size="13" font-weight="bold" fill="#14532d" text-anchor="middle">C620 ID4</text>
+  <text x="730.5" y="167" font-size="12" fill="#334155" text-anchor="middle">后左 · M3508</text>
+
+  <text x="330" y="242" font-size="13" font-weight="bold" fill="#1d4ed8">CAN1 · 底盘电机（经 3508 那块分电板并联）</text>
+  <text x="330" y="262" font-size="12" fill="#334155">F405 → 0x200：4 个电机的电流，1 kHz</text>
+  <text x="330" y="281" font-size="12" fill="#334155">C620 → 0x201~0x204：反馈，各 1 kHz；负载约 56%~68%</text>
+  <text x="330" y="300" font-size="12" fill="#334155">终端：F405 板上 R10 + 最远那个 C620 打开终端电阻</text>
+
+  <!-- ===== F405 ===== -->
+  <rect x="50" y="310" width="262" height="150" rx="10" fill="#eef2ff" stroke="#4338ca" stroke-width="2"/>
+  <text x="181" y="338" font-size="16" font-weight="bold" fill="#1e3a8a" text-anchor="middle">F405 底盘主控</text>
+  <text x="64" y="364" font-size="12" fill="#334155">CAN1：CN7 / CN15（2-pin）</text>
+  <text x="64" y="384" font-size="12" fill="#334155">CAN2：CN8 / CN9（4-pin）</text>
+  <text x="64" y="404" font-size="12" fill="#334155">SWD：CN5</text>
+  <text x="64" y="424" font-size="12" fill="#94a3b8">没用：DBUS、UART、RS485、USB、IMU</text>
+  <text x="64" y="446" font-size="12" fill="#94a3b8">程序：F405_Project</text>
+
+  <!-- ===== 板间 CAN：F405 CAN2 → 新分电板（yaw）→ 滑环 → C 板 CAN1 → pitch ===== -->
+  <polyline points="181,460 181,545 950,545 950,440" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="1100,440 1100,545 1372.5,545 1372.5,560" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <text x="320" y="486" font-size="13" font-weight="bold" fill="#6d28d9">板间 CAN：F405 CAN2 ↔ C 板 CAN1（过滑环）</text>
+  <text x="320" y="506" font-size="12" fill="#334155">F405 只收不发，只认 0x110；CN8 的 1 脚（5 V）空着</text>
+
+  <rect x="385" y="527" width="100" height="36" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="435" y="550" font-size="12" fill="#4c1d95" text-anchor="middle">总线分电板</text>
+  <line x1="435" y1="563" x2="435" y2="592" stroke="#7c3aed" stroke-width="3"/>
+  <rect x="360" y="592" width="150" height="58" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+  <text x="435" y="616" font-size="13" font-weight="bold" fill="#7c2d12" text-anchor="middle">yaw RS05（ID 1）</text>
+  <text x="435" y="637" font-size="12" fill="#334155" text-anchor="middle">装在底盘，齿轮带云台转</text>
+
+  <text x="833" y="570" font-size="10" fill="#854d0e" text-anchor="middle">CANH</text>
+  <text x="833" y="584" font-size="10" fill="#854d0e" text-anchor="middle">CANL</text>
+  <text x="833" y="600" font-size="10" fill="#854d0e" text-anchor="middle">另有 XT</text>
+  <text x="833" y="614" font-size="10" fill="#854d0e" text-anchor="middle">电源线</text>
+
+  <text x="942" y="470" font-size="11" fill="#6d28d9" text-anchor="end">口 1</text>
+  <text x="1092" y="470" font-size="11" fill="#6d28d9" text-anchor="end">口 2</text>
+
+  <text x="1130" y="462" font-size="12" fill="#334155">0x110：C 板 → F405 底盘指令，1 kHz</text>
+  <text x="1130" y="480" font-size="12" fill="#334155">RS05 指令 / 应答：扩展帧，各 1 kHz</text>
+  <text x="1130" y="498" font-size="12" fill="#334155">负载约 64%~78%，C 板发送邮箱每周期用满</text>
+  <text x="1130" y="516" font-size="12" fill="#334155">终端：F405 R11 + C 板板载 120 Ω</text>
+  <text x="1130" y="534" font-size="12" fill="#334155">接好断电量 CANH–CANL 约 60 Ω</text>
+
+  <rect x="1290" y="560" width="165" height="58" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+  <text x="1372.5" y="584" font-size="13" font-weight="bold" fill="#7c2d12" text-anchor="middle">pitch RS05（ID 2）</text>
+  <text x="1372.5" y="605" font-size="12" fill="#334155" text-anchor="middle">在云台上，连杆带炮管</text>
+
+  <!-- ===== C 板 ===== -->
+  <rect x="900" y="250" width="270" height="190" rx="10" fill="#eef2ff" stroke="#4338ca" stroke-width="2"/>
+  <text x="1035" y="278" font-size="15" font-weight="bold" fill="#1e3a8a" text-anchor="middle">C 板 云台主控（装在炮管上）</text>
+  <text x="914" y="304" font-size="12" fill="#334155">CAN1 ×2 口（板上是通的）</text>
+  <text x="914" y="324" font-size="12" fill="#334155">CAN2（4-pin）</text>
+  <text x="914" y="344" font-size="12" fill="#334155">DBUS（USART3_RX，100 kbps）</text>
+  <text x="914" y="364" font-size="12" fill="#334155">BMI088：板上 SPI1 → 姿态（IMU 模式用）</text>
+  <text x="914" y="384" font-size="12" fill="#334155">SWD</text>
+  <text x="914" y="410" font-size="12" fill="#94a3b8">程序：Gimbal_test_RS05</text>
+
+  <!-- DBUS：DR16 → C 板；遥控器 → DR16 -->
+  <rect x="1000" y="130" width="150" height="56" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="1075" y="153" font-size="13" font-weight="bold" fill="#7c2d12" text-anchor="middle">DR16 接收机</text>
+  <text x="1075" y="174" font-size="12" fill="#334155" text-anchor="middle">装在云台上</text>
+  <line x1="1075" y1="186" x2="1075" y2="250" stroke="#ea580c" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="1085" y="222" font-size="11" fill="#c2410c">DBUS，100 kbps（代码还没写）</text>
+
+  <rect x="1290" y="130" width="150" height="56" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+  <text x="1365" y="153" font-size="13" font-weight="bold" fill="#334155" text-anchor="middle">遥控器</text>
+  <text x="1365" y="174" font-size="12" fill="#334155" text-anchor="middle">2.4 GHz</text>
+  <line x1="1150" y1="158" x2="1290" y2="158" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="1220" y="150" font-size="11" fill="#64748b" text-anchor="middle">无线</text>
+
+  <!-- CAN2：发射机构 -->
+  <line x1="1170" y1="333" x2="1245" y2="333" stroke="#16a34a" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="1207" y="325" font-size="11" fill="#15803d" text-anchor="middle">CAN2</text>
+  <rect x="1245" y="300" width="215" height="66" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="1352.5" y="325" font-size="13" font-weight="bold" fill="#15803d" text-anchor="middle">发射机构（还没写）</text>
+  <text x="1352.5" y="348" font-size="12" fill="#334155" text-anchor="middle">摩擦轮 M3508 ×2 + 拨盘 M2006</text>
+
+  <!-- 图例 -->
+  <line x1="40" y1="696" x2="84" y2="696" stroke="#2563eb" stroke-width="4"/>
+  <text x="92" y="700" font-size="12" fill="#334155">CAN1：底盘电机</text>
+  <line x1="230" y1="696" x2="274" y2="696" stroke="#7c3aed" stroke-width="4"/>
+  <text x="282" y="700" font-size="12" fill="#334155">板间 CAN：过滑环</text>
+  <line x1="420" y1="696" x2="464" y2="696" stroke="#16a34a" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="472" y="700" font-size="12" fill="#334155">CAN2：发射机构（还没写）</text>
+  <line x1="650" y1="696" x2="694" y2="696" stroke="#ea580c" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="702" y="700" font-size="12" fill="#334155">DBUS：遥控（还没写）</text>
+  <line x1="860" y1="696" x2="904" y2="696" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="912" y="700" font-size="12" fill="#334155">无线</text>
+
+  <!-- 说明 -->
+  <text x="40" y="734" font-size="13" fill="#334155">调试：DAPLink 接 SWD（F405 的 CN5、C 板的 SWD 口），一次只连一块板；只接 DAPLink 时 CAN 不能用（收发器没有 5 V）。</text>
+  <text x="40" y="758" font-size="13" fill="#334155">yaw RS05 装在底盘，但由 C 板控制（这一路过滑环）。滑环接触不好时 yaw 和板间一起断：RS05 100 ms 收不到指令自己停，底盘 50 ms 收不到 0x110 就 RELAX。</text>
+  <text x="40" y="782" font-size="13" fill="#334155">以后：底盘 → 云台回传帧（走板间那路只能低频，或把板间挪到 C 板 CAN2）、裁判系统、超级电容、视觉。</text>
+</svg>
