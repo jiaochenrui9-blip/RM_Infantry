@@ -264,3 +264,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 - 问题：模式切换里先 return 再判就绪，指令 FEED 时每周期清 PID、发不了弹；进了 FEED 掉速也不退。用户改。
 - 未验证：没烧、没上板；`.ioc` 改了但 can.c 没生成（ssh 里 CubeMX 命令行卡住，要用户在 GUI 点 GENERATE CODE）。
 - 细节见 Gimbal_test_RS05/notes.md 最后两节。
+- 晚上（补）：用户让 Claude 把第一版的问题改了（先算完整模式再比、就绪每周期算、只在进出 RELAX 时切电机模式），ARM 0 警告，check2 里 RELAX 直接 FEED 约 1.1 s 进 FEED、拨弹中掉速退回 SPINUP。没上板、没提交。
+
+## 2026-11-15 RS05 云台版本提交
+
+- 当前进度：USB CDC 陀螺仪波形、发射模块及晚上的控制修正随本版提交。根目录 README 已补充两块板的接线和编译烧录步骤。
+- 已验证：本机重跑 RS05 云台 ARM Debug 全量编译，零警告。复跑 check2 共 11 个主机模型场景，复核了就绪后进入 FEED、掉速退回 SPINUP 和掉线锁定。
+- 未验证：本版未烧录，发射机构未上板验证。
+- 对外接口：`Shoot_Init / Shoot_SetCmd / Shoot_Update / Shoot_GetFeedback`，板间 CAN 仍使用 `0x110`。
+- 注意事项和踩过的坑：CAN2 自动重发和离线恢复已写入 `.ioc`，当前生成的 `can.c` 两项仍关闭。
+- 下一步：在 CubeMX 重新生成代码，确认 CAN2 两项配置更新后再编译并上板。

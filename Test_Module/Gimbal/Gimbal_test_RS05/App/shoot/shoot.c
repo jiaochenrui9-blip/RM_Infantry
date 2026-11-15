@@ -55,16 +55,16 @@ void Shoot_SetCmd(const ShootCmd_t *cmd)
     shoot_cmd = (cmd != NULL) ? *cmd : (ShootCmd_t){0};
 }
 
-/* ---- 控制逻辑的约定（2026-11-15 定），下面三块你来写 ----
- * Shoot_Update 每 1 ms：Shoot_UpdateMode → Shoot_SetTarget → 三个 MotorControl_Update（已写好）。
+/* ---- 控制逻辑的约定（2026-11-15 定）----
+ * Shoot_Update 每 1 ms：Shoot_UpdateMode → Shoot_SetTarget → 三个 MotorControl_Update。
  *
  * 1. Shoot_UpdateMode(now_tick)：定实际模式 shoot_mode（反馈给出去的就是它）。
- *    - 任一电机 SHOOT_OFFLINE_TIMEOUT_MS 没反馈 → shoot_fault = 1；指令 RELAX 时清掉；有故障就是 RELAX。（你已经写了）
- *    - 指令 FEED，但摩擦轮还没就绪（见 2）→ 实际是 SPINUP。
+ *    - 任一电机 SHOOT_OFFLINE_TIMEOUT_MS 没反馈 → shoot_fault = 1；指令 RELAX 时清掉；有故障就是 RELAX。
+ *    - 指令 FEED，但摩擦轮还没就绪（见 2）→ 实际是 SPINUP；拨弹中掉出就绪也退回 SPINUP。
  *    - 电机模式只在 RELAX ↔ 非 RELAX 切换时改：进 SPINUP / FEED 三台都 MotorControl_SetMode(..., MOTOR_MODE_SPEED)，
  *      回 RELAX 三台都 MOTOR_MODE_DISABLE。SetMode 自己会清两个 PID 和目标。
  *      SPINUP ↔ FEED 不动电机模式，也不要清摩擦轮的 PID（清了每次开拨、停拨摩擦轮转速都会掉一下）。
- * 2. 摩擦轮就绪（建议写成 static uint8_t Shoot_FrictionReady(uint32_t now_tick)）：
+ * 2. 摩擦轮就绪 Shoot_FrictionReady(now_tick)：
  *    - 条件：shoot_cmd.friction_rpm > 0，两个摩擦轮 |friction_rpm − speed_rpm| < SHOOT_FRICTION_READY_ERR_RPM，
  *      并且已经连续 SHOOT_FRICTION_READY_HOLD_MS。speed_rpm 驱动里已经按方向修正过，直接和逻辑目标比。
  *    - 计时只要一个量：记最后一次“不满足”的 tick，now − 它 ≥ HOLD_MS 就是就绪。
@@ -72,13 +72,12 @@ void Shoot_SetCmd(const ShootCmd_t *cmd)
  * 3. Shoot_SetTarget()：按实际模式给目标（MotorControl_SetTargetSpeed，转子 rpm）。
  *    - SPINUP：两个摩擦轮 friction_rpm，拨弹 0；FEED：摩擦轮同上，拨弹 feeder_rpm；RELAX：不用管（DISABLE 会清目标）。
  *    - 方向不用管，MotorControl 里乘 motor_direction。
- * 现在 1 只写了 RELAX 那一半、2 和 3 是空的，所以改 shoot_test 什么都不会转。
  */
 
-/*判断摩擦轮是否就绪*/
+/*判断摩擦轮是否就绪；非 RELAX 时每周期都要调，计时才连续*/
 static uint8_t Shoot_FrictionReady(uint32_t now_tick)
 {
-    uint16_t target_rpm = shoot_cmd.friction_rpm;
+    int16_t target_rpm = shoot_cmd.friction_rpm;
 
     if (target_rpm <= 0 || abs(target_rpm - shoot_friction_1.speed_rpm) >= SHOOT_FRICTION_READY_ERR_RPM ||
         abs(target_rpm - shoot_friction_2.speed_rpm) >= SHOOT_FRICTION_READY_ERR_RPM)
@@ -87,7 +86,7 @@ static uint8_t Shoot_FrictionReady(uint32_t now_tick)
         return 0;
     }
 
-    if ((now_tick - friction_last_not_ready_tick) <= SHOOT_FRICTION_READY_HOLD_MS)
+    if ((now_tick - friction_last_not_ready_tick) < SHOOT_FRICTION_READY_HOLD_MS)
     {
         return 0;
     }
@@ -110,7 +109,7 @@ static void Shoot_UpdateMode(uint32_t now_tick)
     {
         shoot_fault = 0;
     }
-    /*如果电机掉线或者堵转失败次数过多就进入无力模式*/
+    /*如果电机掉线就锁住，进入无力模式*/
     if (online == 0)
     {
         shoot_fault = 1;
@@ -121,24 +120,30 @@ static void Shoot_UpdateMode(uint32_t now_tick)
         mode = SHOOT_MODE_RELAX;
     }
 
-    if (shoot_mode == mode)
+    /*先把实际模式算完整再和上一周期比：就绪在非 RELAX 时每周期都算，
+      没就绪（包括拨弹中掉出就绪）FEED 退回 SPINUP；RELAX 时当作不满足，下次起转重新计时*/
+    if (mode == SHOOT_MODE_RELAX)
     {
-        return;
+        friction_last_not_ready_tick = now_tick;
     }
-    /*如果摩擦轮还没有就绪就回退模式*/
-    if (mode == SHOOT_MODE_FEED && Shoot_FrictionReady(now_tick) == 0 )
+    else if ((Shoot_FrictionReady(now_tick) == 0U) && (mode == SHOOT_MODE_FEED))
     {
         mode = SHOOT_MODE_SPINUP;
     }
 
-    /*如果命令模式为无力模式则失能所有电机*/
+    if (shoot_mode == mode)
+    {
+        return;
+    }
+
+    /*电机模式只在进出 RELAX 时切；SetMode 会清 PID 和目标，SPINUP ↔ FEED 不切，摩擦轮不掉速*/
     if (mode == SHOOT_MODE_RELAX)
     {
         MotorControl_SetMode(&shoot_friction_1,MOTOR_MODE_DISABLE);
         MotorControl_SetMode(&shoot_friction_2,MOTOR_MODE_DISABLE);
         MotorControl_SetMode(&shoot_feeder,MOTOR_MODE_DISABLE);
     }
-    else if (mode == SHOOT_MODE_FEED || mode == SHOOT_MODE_SPINUP)
+    else if (shoot_mode == SHOOT_MODE_RELAX)
     {
         MotorControl_SetMode(&shoot_friction_1,MOTOR_MODE_SPEED);
         MotorControl_SetMode(&shoot_friction_2,MOTOR_MODE_SPEED);
@@ -151,13 +156,8 @@ static void Shoot_UpdateMode(uint32_t now_tick)
 /* 按实际模式 shoot_mode 给三台电机的速度目标，见上面约定第 3 条。 */
 static void Shoot_SetTarget(void)
 {
-    if (shoot_mode == SHOOT_MODE_RELAX)
-    {
-        MotorControl_SetTargetSpeed(&shoot_friction_1, 0);
-        MotorControl_SetTargetSpeed(&shoot_friction_2, 0);
-        MotorControl_SetTargetSpeed(&shoot_feeder, 0);
-    }
-    else if (shoot_mode == SHOOT_MODE_SPINUP)
+    /* RELAX 不用给：DISABLE 每周期都清目标 */
+    if (shoot_mode == SHOOT_MODE_SPINUP)
     {
         MotorControl_SetTargetSpeed(&shoot_friction_1, shoot_cmd.friction_rpm);
         MotorControl_SetTargetSpeed(&shoot_friction_2, shoot_cmd.friction_rpm);

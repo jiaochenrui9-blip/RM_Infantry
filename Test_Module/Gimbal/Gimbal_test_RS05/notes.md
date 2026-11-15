@@ -778,3 +778,14 @@ python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/yaw_fric
 
 ### 下一步
 - 用户改问题 1~4，Claude 重跑 check2（改完场景 6 应进 FEED、场景 4 应退回 SPINUP），然后 CubeMX 生成 can.c、上板：RELAX 下手转核对三个方向 → SPINUP 调摩擦轮 → FEED。
+
+## 2026-11-15 晚上 第一版的问题改好了（用户让 Claude 改）
+
+- 改了 `shoot.c`，都在用户的写法上动：
+  - `Shoot_UpdateMode`：先把实际模式算完整，再和 `shoot_mode` 比。非 RELAX 时每周期都调 `Shoot_FrictionReady`，没就绪时 FEED 退回 SPINUP（包括拨弹中掉出就绪）；RELAX 时把 `friction_last_not_ready_tick` 设成当前 tick，下次起转重新计时。电机模式只在进出 RELAX 时切（`else if (shoot_mode == SHOOT_MODE_RELAX)` 才切 SPEED），SPINUP ↔ FEED 不再清 PID。
+  - `Shoot_FrictionReady`：`target_rpm` 改成 `int16_t`；`<= HOLD_MS` 改成 `< HOLD_MS`（和“≥ HOLD_MS 就绪”对齐）。
+  - `Shoot_SetTarget`：删了 RELAX 分支（DISABLE 本来就清目标）。
+  - 约定注释里“你来写”“现在是空的”那几句删掉了。
+- 验证：ARM 0 警告（text 65200、data 372、bss 10860）。check2 重跑：场景 6（RELAX 直接 FEED）1076 ms 后进 FEED，摩擦轮 2962 rpm、拨弹 800 rpm（目标 1000，模型里只有 P+I 的稳态差）；场景 4（拨弹中摩擦轮掉到 2119）退回 SPINUP、拨弹目标 0；场景 3（SPINUP 已经稳住再给 FEED）1 ms 进 FEED，是对的（SPINUP 期间也在计时，早就满 200 ms）；掉线锁（7~10）、负转速（11）不变。掉速后恢复、再进 FEED 这一段没单独测。
+- 没烧、没上板；CAN2 的 can.c 还没生成；ffcc403（改之前的版本）在 B 本地，没推上 GitHub（ssh 里拿不到凭据），这次的改动没提交。
+- 补：17:28 shoot.c 又被写回 13:25 版。CLion 日志显示它 17:28 重启过：重启前编辑器里是旧内容，关的时候存回了磁盘（推断 17:11 也是这样）。18:23 按 ffcc403 + 上面的修改重新写入，ARM 0 警告、check2 结果一样。以后 Claude 改了文件，CLion 里要从磁盘重新加载（File → Reload All from Disk），别让编辑器里的旧内容存回去。
