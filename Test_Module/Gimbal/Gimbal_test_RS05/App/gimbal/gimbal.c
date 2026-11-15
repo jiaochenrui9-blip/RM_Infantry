@@ -121,6 +121,7 @@ static void Gimbal_UpdateMode(uint8_t online)
     {
         gimbal_fault = 1U;
     }
+
     if (gimbal_fault != 0U)
     {
         mode = GIMBAL_MODE_RELAX;

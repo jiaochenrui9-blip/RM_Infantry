@@ -10,13 +10,15 @@
 #include "BMI088.h"
 #include "gimbal.h"
 #include "gimbal_test_cmd.h"
+#include "shoot.h"
+#include "shoot_test_cmd.h"
 #include "ins.h"
 #include "tim.h"
 
 /* 每路 CAN 只能有一个 manager，这路上的所有电机都注册进来（见根目录 notes.md 第 2 节）。
-   两个 RS05 都在 CAN1，和板间通信同一路；这一版云台板上没有大疆电机，CAN2 不用、不启动
-   （以后发射机构接 CAN2 时，在这里加它的 manager 并 Start）。 */
+   两个 RS05 和板间通信使用 CAN1；发射机构的三个大疆电机共用 CAN2 的一个 manager。 */
 static RS05_Manager_t robot_can1;
+static DJI_MotorManager_t robot_can2;
 
 static uint32_t robot_last_tick;
 
@@ -37,8 +39,20 @@ void Robot_Init(void)
        标定期间整车别动。失败只影响 IMU 模式，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
     (void)INS_Init(&hspi1, &htim10);
 
+    /* 发射电机先注册和初始化，再启动 CAN2；当前控制骨架保持零输出。 */
+    if ((DJI_MotorManager_Init(&robot_can2, &hcan2) != HAL_OK) ||
+        (Shoot_Init(&robot_can2) != HAL_OK))
+    {
+        Error_Handler();
+    }
+
     /* 配 RS05 的过滤器（CAN1 组 1，只收类型 2 反馈）并启动 CAN1。0x110 也走 CAN1，只发不收，不用另外启动。 */
     if (RS05_Manager_Start(&robot_can1) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    if (DJI_MotorManager_Start(&robot_can2) != HAL_OK)
     {
         Error_Handler();
     }
@@ -53,6 +67,7 @@ void Robot_Loop(void)
     GimbalFeedback_t feedback;
     GimbalCmd_t gimbal_cmd;
     ChassisCmd_t chassis_cmd;
+    ShootCmd_t shoot_cmd;
 
     if (now == robot_last_tick)
     {
@@ -69,9 +84,12 @@ void Robot_Loop(void)
     Gimbal_GetFeedback(&feedback);
     GimbalTestCmd_Update(now, &feedback, &gimbal_cmd, &chassis_cmd);
     Gimbal_SetCmd(&gimbal_cmd);
+    ShootTestCmd_Update(&shoot_cmd);
+    Shoot_SetCmd(&shoot_cmd);
 
-    /* 2. 控制：以后发射、底盘的 Update 也加在这里 */
+    /* 2. 控制：模块分别更新，不在模块内部发送 CAN 帧 */
     Gimbal_Update(now);
+    Shoot_Update(now);
 
     /* 3. 发送：所有模块算完后，每路 CAN 每周期只发一次。RS05 的反馈只靠应答，
           所以每个电机每周期都要发一帧（RELAX 时是停止帧）。 */
@@ -81,6 +99,9 @@ void Robot_Loop(void)
        邮箱不够时先让电机帧进邮箱。两个 RS05 加 0x110 正好占满 3 个发送邮箱，这一路别再加周期帧。
        CAN1 在 .ioc 里开了自动重发：RS05 的应答比这三帧都优先，仲裁输了要靠重发（根目录 notes.md 第 4 节）。 */
     (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+
+    /* 三个大疆电机合成一帧 0x200；第四槽为零。CAN2 邮箱与 CAN1 独立。 */
+    (void)DJI_MotorManager_SendAll(&robot_can2);
 }
 
 /* HAL 的 CAN 接收回调：每次读一帧，按总线交给对应的 manager。
@@ -98,6 +119,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     if (hcan == &hcan1)
     {
         RS05_Manager_ProcessRxFrame(&robot_can1, &header, data);
+    }
+    else if (hcan == &hcan2)
+    {
+        DJI_MotorManager_ProcessRxFrame(&robot_can2, &header, data);
     }
 }
 

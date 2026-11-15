@@ -55,15 +55,24 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/gimbal/gimbal.c
     App/ins/ins.c
     App/test_cmd/gimbal_test_cmd.c
+    App/test_cmd/shoot_test_cmd.c
+    App/shoot/shoot.c
+    App/USB/USB.c
 
-    # 云台电机是 RS05（和 Gimbal_test 的区别）。云台板上没有大疆电机，DJI_Driver 不编
+    # 云台使用 RS05，发射机构使用大疆电机
     ${SHARED_DIR}/Devices/RS05/rs05.c
+    ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
+    ${SHARED_DIR}/Devices/DJI_Driver/dji_motor_manager.c
+    ${SHARED_DIR}/Devices/DJI_Driver/dji_m3508.c
+    ${SHARED_DIR}/Devices/DJI_Driver/dji_m2006.c
+    ${SHARED_DIR}/Devices/DJI_Driver/motor_control.c
     ${SHARED_DIR}/Algorithm/PID.c
     ${SHARED_DIR}/Algorithm/user_math.c
     ${SHARED_DIR}/Algorithm/Attitude.c
     ${SHARED_DIR}/Devices/BMI088/BMI088.c
     ${SHARED_DIR}/Devices/IST8310/IST8310.c
     ${SHARED_DIR}/BSP/can_bus.c
+    ${SHARED_DIR}/BSP/vofa.c
     # 板间通信，和底盘板共用一份：云台板只用 ChassisLink_SendCmd
     ${SHARED_DIR}/Link/chassis_link.c
 )
@@ -74,8 +83,11 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/gimbal
     App/ins
     App/test_cmd
+    App/shoot
+    App/USB
 
     ${SHARED_DIR}/Devices/RS05
+    ${SHARED_DIR}/Devices/DJI_Driver
     ${SHARED_DIR}/Devices/BMI088
     ${SHARED_DIR}/Devices/IST8310
     ${SHARED_DIR}/Algorithm
