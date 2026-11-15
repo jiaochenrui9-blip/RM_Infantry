@@ -8,9 +8,9 @@
    - 指令 FEED 时，摩擦轮没就绪（或刚掉出就绪）反馈是 SPINUP，拨弹轮不转；就绪以后才是 FEED。 */
 typedef enum
 {
-    SHOOT_MODE_RELAX = 0,    /* 三台电机无力（电机层 DISABLE，输出 0）；故障锁住时也是它 */
+    SHOOT_MODE_RELAX = 0,    /* 三台电机无力（电机层 DISABLE，输出 0）；故障锁住（掉线、连续卡弹太多次）时也是它 */
     SHOOT_MODE_SPINUP,       /* 摩擦轮速度环转到 friction_rpm；拨弹轮速度环、目标 0（顶住不让弹丸被推进去） */
-    SHOOT_MODE_FEED          /* 摩擦轮照常；拨弹轮速度环转到 feeder_rpm */
+    SHOOT_MODE_FEED          /* 摩擦轮照常；拨弹轮速度环转到 feeder_rpm，卡弹时自己反转一下再继续（模块内部，不另出模式） */
 } ShootMode_e;
 
 typedef struct

@@ -789,3 +789,39 @@ python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/yaw_fric
 - 验证：ARM 0 警告（text 65200、data 372、bss 10860）。check2 重跑：场景 6（RELAX 直接 FEED）1076 ms 后进 FEED，摩擦轮 2962 rpm、拨弹 800 rpm（目标 1000，模型里只有 P+I 的稳态差）；场景 4（拨弹中摩擦轮掉到 2119）退回 SPINUP、拨弹目标 0；场景 3（SPINUP 已经稳住再给 FEED）1 ms 进 FEED，是对的（SPINUP 期间也在计时，早就满 200 ms）；掉线锁（7~10）、负转速（11）不变。掉速后恢复、再进 FEED 这一段没单独测。
 - 没烧、没上板；CAN2 的 can.c 还没生成；ffcc403（改之前的版本）在 B 本地，没推上 GitHub（ssh 里拿不到凭据），这次的改动没提交。
 - 补：17:28 shoot.c 又被写回 13:25 版。CLion 日志显示它 17:28 重启过：重启前编辑器里是旧内容，关的时候存回了磁盘（推断 17:11 也是这样）。18:23 按 ffcc403 + 上面的修改重新写入，ARM 0 警告、check2 结果一样。以后 Claude 改了文件，CLion 里要从磁盘重新加载（File → Reload All from Disk），别让编辑器里的旧内容存回去。
+
+## 2026-11-15 晚上 第二版接口：卡弹检测 + 反转退弹（Claude 定接口，用户写 Shoot_FeederTarget）
+
+- 用户选的：这次只加卡弹检测和反转退弹。单发 / 定数连发要拨盘格数，用户还不知道，这次不做，格数也不加宏（等做单发时再加）；摩擦轮斜坡、热量限制也不做。
+- 对外接口不变：`ShootCmd_t`、`ShootFeedback_t`、四个函数都没变。卡弹反转在实际 FEED 内部，不另出模式；连续卡太多次走现有的 `shoot_fault` 锁（RELAX，给一次 RELAX 指令解除）。`shoot.h` 里 RELAX、FEED 的注释加了这两句。
+- `shoot_config.h` 加了 7 个宏（建议值，没实测）：`SHOOT_JAM_CURRENT` 2700（拨弹轮 output_current，要小于限幅 3000）、`SHOOT_JAM_SPEED_RPM` 300、`SHOOT_JAM_DETECT_MS` 100、`SHOOT_JAM_REVERSE_RPM` 2000、`SHOOT_JAM_REVERSE_MS` 100、`SHOOT_JAM_CLEAR_MS` 500、`SHOOT_JAM_MAX_COUNT` 3。
+- `shoot.c`：约定注释加了第 4 条（卡弹条件、反转、清零、锁住、离开 FEED 怎么清）；加了桩 `static int16_t Shoot_FeederTarget(uint32_t now_tick)`，现在只返回 `shoot_cmd.feeder_rpm`；`Shoot_SetTarget` 多了 `now_tick` 参数，FEED 分支拨弹目标改成调它。行为和第一版一样。
+- 用 output_current（速度环的指令）判，不用 feedback_current：卡住时速度环顶到限幅，最稳。两者和 speed_rpm 都是逻辑方向。
+- 验证：ARM 0 警告（text 65244、data 372、bss 10860）。check2 加了场景 12~19（`jam` 标志把拨弹轮转速强制为 0）：现在拨盘卡住时电流顶到 3000（> 2700，判得出来），拨弹目标一直是 1000、不反转、也不锁，就是桩的行为；场景 1~11 结果和改之前一样。
+- 用户写完以后看：场景 14 拨弹目标范围应出现 −2000；15 松开后回到 1000；16 一直卡死应锁成 RELAX（约 3 次 × (100 + 100) ms 内）；17 松开仍锁着；18 RELAX 解锁；19 恢复。
+- 没烧、没上板；这次和上一次修改都没提交；CAN2 的 can.c 还没生成。
+
+## 2026-11-15 夜里 卡弹第一版：用户写了状态机，Claude 补完
+
+- 用户写的：`Shoot_FeederTarget` 用 NORMAL / DETECT / REVERSE 三个状态的状态机，卡满次数在 `Shoot_UpdateMode` 里接到 `shoot_fault`。用户说有的地方不会写。
+- Claude 改 / 补的：
+  - DETECT 分支没有 `return`（落到函数末尾，返回值未定义）→ 计时期间返回 feeder_rpm，判定卡弹那一拍直接返回反转。
+  - 卡弹次数从不清零，卡满 3 次后给 RELAX 也解不了锁（同一周期清了 fault 又被 count 设回去）→ 指令 RELAX 时和 `shoot_fault` 一起清 `feeder_jam_count`。
+  - 补了“正转顺利 `SHOOT_JAM_CLEAR_MS` 次数清零”（NORMAL 里判）。
+  - 补了离开 FEED 的复位：`Shoot_SetTarget` 里实际模式不是 FEED 时，状态回 NORMAL、tick 设成当前。
+  - `feeder_jam_reverse_tick` 和 `feeder_jam_last_tick` 合并成一个（每次换状态记一次）；反转 `<=` 改 `<`；卡弹条件提成一个 `jamming` 变量，不写两遍。
+  - `Shoot_JAM_e` 从 shoot.h 挪到 shoot.c（内部状态，不是接口）。
+- 验证：ARM 0 警告（text 65524、data 372、bss 10868）。check2 19 个场景：卡住 300 ms 反转一次、松开回到正转（14、15）；一直卡死锁成 RELAX，松开仍锁，给 RELAX 解锁，再 FEED 恢复（16~19）；1~11 和之前一致。“正转 500 ms 次数清零”没单独测。
+- **模型里拨弹轮加速度改了**：原来 3 A 时 3000 rpm/s，起转从 0 到 300 rpm 正好 100 ms = `SHOOT_JAM_DETECT_MS`，每次进 FEED 起转都被判成卡弹、连判 3 次锁住。改成 3 A 时 60000 rpm/s（A 1 → 20、C 2 → 20）后正常。M2006 空载转子加速度按参数粗算是每秒十万 rpm 量级（推断，没测），所以原来那组太慢。
+- **上板要看**：起转、反转结束后重新正转时电流都会顶到限幅、转速低，如果这一段长过 100 ms（拨盘重、装满弹），会被误判。上板先空拨盘、再装弹，看 FEED 起转时 `speed_rpm` 多久过 300；误判就加大 `SHOOT_JAM_DETECT_MS` 或减小 `SHOOT_JAM_SPEED_RPM`。
+- 没烧、没上板、没提交；can.c 还没生成。
+
+## 2026-11-15 深夜 下一版只做“反转改成位置模式”（还没开始）
+
+- 用户定的范围：单发、连发先不做（现在这样就够了）；下一版只把卡弹反转从“按转速反转一段时间”改成“位置模式往回转固定角度”，做到这里为止，别的以后再说。
+- 这一轮 Claude 没等用户说就直接改了代码（Shared 驱动加了读角度、设位置环限速、进位置模式记零点，shoot 加了 7 个宏、改了 `Shoot_FeederTarget` 的签名），用户叫停，已经全部撤回到上一节的版本：Shared 和 ffcc403 一样，固件 text 65524 / bss 10868、check2 19 个场景和撤回前一致。
+- 开工时先只给接口和注意事项、不动代码，用户写。绕不开的两点（要用户定改不改 Shared）：
+  - 电机层位置环的零点只在第一次进位置模式时记一次（`reference_ready` 之后不再清），也没有读当前角度的接口，没法“从现在的位置往回转 N°”。
+  - 位置环输出（给速度环的目标）限速写死 300 转子 rpm（`MOTOR_CONTROL_POSITION_SPEED_LIMIT`），M2006 输出轴约 8 rpm，转 30° 要半秒多。
+  - 另外：位置模式下速度目标由位置环每 5 ms 写一次，`Shoot_SetTarget` 每 1 ms 调 `SetTargetSpeed` 会把它盖掉，函数结构要跟着变。
+  - check2 的电机模型现在不回编码器角度，位置环在模型里转不起来，验之前要先补。

@@ -15,6 +15,18 @@ static ShootCmd_t shoot_cmd;
 static ShootMode_e shoot_mode;
 static uint8_t shoot_fault;    /* 电机掉线或故障 → 锁在 RELAX，指令给一次 RELAX 才解除 */
 static uint32_t friction_last_not_ready_tick;    /* 摩擦轮不就绪的最后一次 tick，计时用 */
+/* 卡弹状态机只在本文件用，不放 shoot.h */
+typedef enum
+{
+    SHOOT_JAM_NORMAL,     /* 正转 */
+    SHOOT_JAM_DETECT,     /* 满足卡弹条件，计时中，还在正转 */
+    SHOOT_JAM_REVERSE,    /* 判定卡弹，反转中 */
+} Shoot_JAM_e;
+
+static uint32_t feeder_jam_last_tick;    /* 进入当前卡弹状态的 tick：DETECT 计时、REVERSE 计时、NORMAL 里判 CLEAR_MS 都用它 */
+static uint8_t feeder_jam_count;    /* 连续卡弹次数，到 SHOOT_JAM_MAX_COUNT 锁住；正转顺利 CLEAR_MS 或指令 RELAX 清零 */
+static Shoot_JAM_e feeder_jam_state;    /* 卡弹状态机 */
+
 HAL_StatusTypeDef Shoot_Init(DJI_MotorManager_t *bus)
 {
     shoot_cmd = (ShootCmd_t){0};
@@ -72,6 +84,22 @@ void Shoot_SetCmd(const ShootCmd_t *cmd)
  * 3. Shoot_SetTarget()：按实际模式给目标（MotorControl_SetTargetSpeed，转子 rpm）。
  *    - SPINUP：两个摩擦轮 friction_rpm，拨弹 0；FEED：摩擦轮同上，拨弹 feeder_rpm；RELAX：不用管（DISABLE 会清目标）。
  *    - 方向不用管，MotorControl 里乘 motor_direction。
+ *
+ * ---- 第二版：卡弹检测 + 反转退弹（2026-11-15 晚上定，你来写 Shoot_FeederTarget）----
+ * 4. Shoot_FeederTarget(now_tick)：只在实际 FEED 时由 Shoot_SetTarget 调，返回这个周期拨弹轮的目标（转子 rpm）。
+ *    - 卡弹条件：shoot_cmd.feeder_rpm > 0，shoot_feeder.output_current ≥ SHOOT_JAM_CURRENT，
+ *      shoot_feeder.speed_rpm < SHOOT_JAM_SPEED_RPM，连续 SHOOT_JAM_DETECT_MS。
+ *      output_current、speed_rpm 都是逻辑方向（驱动里已按方向修正）。用 output_current（速度环算出来的指令）
+ *      而不是 feedback_current：卡住时速度环顶到限幅，指令最稳。
+ *    - 判到卡弹：次数 +1，接下来 SHOOT_JAM_REVERSE_MS 返回 −SHOOT_JAM_REVERSE_RPM，时间到了回到 feeder_rpm。
+ *      反转期间不判卡弹。
+ *    - 正转顺利（没满足卡弹条件）连续 SHOOT_JAM_CLEAR_MS，次数清零。
+ *    - 次数到 SHOOT_JAM_MAX_COUNT：shoot_fault = 1（下一周期 UpdateMode 就进 RELAX，和掉线同一把锁），次数清零。
+ *    - 要存的量（建议，都是 static）：最后一次“不满足卡弹条件”的 tick（计时，同就绪那个写法）；
+ *      反转开始的 tick；是否在反转；连续卡弹次数；最后一次卡弹的 tick（用来判 CLEAR_MS）。能合并的自己合并。
+ *    - 离开 FEED（退回 SPINUP、RELAX）：反转要停、计时要重来（下次进 FEED 别拿旧 tick 立刻判卡）；
+ *      次数在 RELAX 时清零，SPINUP ↔ FEED 来回时保留（摩擦轮掉速和卡弹常一起出现）。
+ *      这一条放在 UpdateMode 里模式变化的地方做，或者在 SetTarget 非 FEED 分支做，你选。
  */
 
 /*判断摩擦轮是否就绪；非 RELAX 时每周期都要调，计时才连续*/
@@ -104,13 +132,14 @@ static void Shoot_UpdateMode(uint32_t now_tick)
     {
         online = 0;
     }
-    /*如果当前模式为无力模式则清除故障标志*/
+    /*如果当前模式为无力模式则清除故障标志；卡弹次数也要一起清，不然下面马上又锁上*/
     if (mode == SHOOT_MODE_RELAX)
     {
         shoot_fault = 0;
+        feeder_jam_count = 0;
     }
-    /*如果电机掉线就锁住，进入无力模式*/
-    if (online == 0)
+    /*如果电机掉线或者堵转次数过多就锁住，进入无力模式*/
+    if (online == 0 || feeder_jam_count >= SHOOT_JAM_MAX_COUNT)
     {
         shoot_fault = 1;
     }
@@ -153,8 +182,60 @@ static void Shoot_UpdateMode(uint32_t now_tick)
     shoot_mode = mode;
 }
 
+/* 实际 FEED 时拨弹轮的目标，含卡弹检测和反转，见上面约定第 4 条。 */
+static int16_t Shoot_FeederTarget(uint32_t now_tick)
+{
+    uint8_t jamming = (shoot_cmd.feeder_rpm > 0) &&
+                      (shoot_feeder.output_current >= SHOOT_JAM_CURRENT) &&
+                      (shoot_feeder.speed_rpm < SHOOT_JAM_SPEED_RPM);
+
+    if (feeder_jam_state == SHOOT_JAM_NORMAL)
+    {
+        if (jamming)
+        {
+            feeder_jam_state = SHOOT_JAM_DETECT;
+            feeder_jam_last_tick = now_tick;
+        }
+        else if ((feeder_jam_count != 0U) && (now_tick - feeder_jam_last_tick >= SHOOT_JAM_CLEAR_MS))
+        {
+            /*正转顺利跑满 CLEAR_MS，连续卡弹次数清零*/
+            feeder_jam_count = 0;
+        }
+        return shoot_cmd.feeder_rpm;
+    }
+
+    if (feeder_jam_state == SHOOT_JAM_DETECT)
+    {
+        if (!jamming)
+        {
+            /*误判，退回NORMAL模式*/
+            feeder_jam_state = SHOOT_JAM_NORMAL;
+            feeder_jam_last_tick = now_tick;
+        }
+        else if (now_tick - feeder_jam_last_tick >= SHOOT_JAM_DETECT_MS)
+        {
+            /*判定为卡弹，进入反转状态；次数到上限时下一周期 UpdateMode 锁住*/
+            feeder_jam_state = SHOOT_JAM_REVERSE;
+            feeder_jam_last_tick = now_tick;
+            feeder_jam_count++;
+            return -SHOOT_JAM_REVERSE_RPM;
+        }
+        return shoot_cmd.feeder_rpm;    /*计时期间还在正转*/
+    }
+
+    /* SHOOT_JAM_REVERSE */
+    if (now_tick - feeder_jam_last_tick < SHOOT_JAM_REVERSE_MS)
+    {
+        return -SHOOT_JAM_REVERSE_RPM;
+    }
+    /*反转结束，回到正常正转*/
+    feeder_jam_state = SHOOT_JAM_NORMAL;
+    feeder_jam_last_tick = now_tick;
+    return shoot_cmd.feeder_rpm;
+}
+
 /* 按实际模式 shoot_mode 给三台电机的速度目标，见上面约定第 3 条。 */
-static void Shoot_SetTarget(void)
+static void Shoot_SetTarget(uint32_t now_tick)
 {
     /* RELAX 不用给：DISABLE 每周期都清目标 */
     if (shoot_mode == SHOOT_MODE_SPINUP)
@@ -167,14 +248,21 @@ static void Shoot_SetTarget(void)
     {
         MotorControl_SetTargetSpeed(&shoot_friction_1, shoot_cmd.friction_rpm);
         MotorControl_SetTargetSpeed(&shoot_friction_2, shoot_cmd.friction_rpm);
-        MotorControl_SetTargetSpeed(&shoot_feeder, shoot_cmd.feeder_rpm);
+        MotorControl_SetTargetSpeed(&shoot_feeder, Shoot_FeederTarget(now_tick));
+    }
+
+    /* 不在 FEED：反转停掉、计时重来，下次进 FEED 从正转开始判（次数在 UpdateMode 里随 RELAX 清） */
+    if (shoot_mode != SHOOT_MODE_FEED)
+    {
+        feeder_jam_state = SHOOT_JAM_NORMAL;
+        feeder_jam_last_tick = now_tick;
     }
 }
 
 void Shoot_Update(uint32_t now_tick)
 {
     Shoot_UpdateMode(now_tick);
-    Shoot_SetTarget();
+    Shoot_SetTarget(now_tick);
 
     MotorControl_Update(&shoot_friction_1,now_tick);
     MotorControl_Update(&shoot_friction_2,now_tick);

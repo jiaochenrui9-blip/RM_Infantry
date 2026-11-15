@@ -274,3 +274,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 - 对外接口：`Shoot_Init / Shoot_SetCmd / Shoot_Update / Shoot_GetFeedback`，板间 CAN 仍使用 `0x110`。
 - 注意事项和踩过的坑：CAN2 自动重发和离线恢复已写入 `.ioc`，当前生成的 `can.c` 两项仍关闭。
 - 下一步：在 CubeMX 重新生成代码，确认 CAN2 两项配置更新后再编译并上板。
+- 晚上（补）：发射机构第二版接口定了：只加卡弹检测 + 反转退弹（单发等拨盘格数，没做）。对外接口不变，卡弹在 FEED 内部处理，连续卡满次数走 `shoot_fault` 锁。config 加了 7 个 `SHOOT_JAM_*` 宏，shoot.c 加了桩 `Shoot_FeederTarget`（用户写），check2 加了卡弹场景 12~19。ARM 0 警告，行为和第一版一样。没提交。
+- 夜里（补）：卡弹第一版完成（用户写状态机，Claude 补了 DETECT 返回值、RELAX 清卡弹次数以便解锁、CLEAR_MS 清零、离开 FEED 复位）。ARM 0 警告，check2 19 个场景按预期。上板要看起转会不会被误判成卡弹。没提交。
+- 深夜（补）：发射机构下一版只做“卡弹反转改成位置模式、转固定角度”，单发 / 连发不做。还没开始；Claude 先改了代码被叫停，已全部撤回（Shared 无改动）。开工前要定 Shared 位置环的零点和限速怎么改，见 Gimbal_test_RS05/notes.md 最后一节。
+- 本次提交收录卡弹检测、定时反转和连续卡弹锁定。重新全量编译 RS05 云台 ARM Debug，零警告。复跑 check2 的 19 个模型场景，复核了反转、持续卡住锁定和解锁恢复。未烧录、未上板。

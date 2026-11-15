@@ -20,6 +20,18 @@
 #define SHOOT_FRICTION_READY_ERR_RPM  200
 #define SHOOT_FRICTION_READY_HOLD_MS  200U
 
+/* 卡弹（只在实际 FEED、feeder_rpm > 0 时判）：拨弹轮 output_current ≥ JAM_CURRENT 且 speed_rpm < JAM_SPEED_RPM，
+   连续 JAM_DETECT_MS 算卡一次 → 以 JAM_REVERSE_RPM 反转 JAM_REVERSE_MS 再正转。
+   正转顺利跑满 JAM_CLEAR_MS 次数清零；连续卡到 JAM_MAX_COUNT 次就锁住（shoot_fault，给一次 RELAX 才解除）。
+   JAM_CURRENT 必须小于 SHOOT_FEEDER_CURRENT_LIMIT，不然永远判不出来。全是建议值，转速都是转子 rpm（M2006 减速比 36）。 */
+#define SHOOT_JAM_CURRENT             2700
+#define SHOOT_JAM_SPEED_RPM           300
+#define SHOOT_JAM_DETECT_MS           100U
+#define SHOOT_JAM_REVERSE_RPM         2000
+#define SHOOT_JAM_REVERSE_MS          100U
+#define SHOOT_JAM_CLEAR_MS            500U
+#define SHOOT_JAM_MAX_COUNT           3U
+
 /* 电流限幅是协议原始值：C620 ±16384 = ±20 A，C610 ±10000 = ±10 A。
    第一次上电用小的：摩擦轮 6000（约 7.3 A，只影响起转快慢），拨弹 3000（3 A，卡弹时不至于打坏拨盘）。 */
 #define SHOOT_FRICTION_CURRENT_LIMIT  6000.0f
