@@ -825,3 +825,27 @@ python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/yaw_fric
   - 位置环输出（给速度环的目标）限速写死 300 转子 rpm（`MOTOR_CONTROL_POSITION_SPEED_LIMIT`），M2006 输出轴约 8 rpm，转 30° 要半秒多。
   - 另外：位置模式下速度目标由位置环每 5 ms 写一次，`Shoot_SetTarget` 每 1 ms 调 `SetTargetSpeed` 会把它盖掉，函数结构要跟着变。
   - check2 的电机模型现在不回编码器角度，位置环在模型里转不起来，验之前要先补。
+
+## 2026-11-16 第三版：卡弹反转改成位置模式（用户让 Claude 直接加）
+
+- 在 26e176c（用户提交的第二版）上改：
+  - Shared 电机层：切位置模式时记零点、`MotorControl_GetDegree`、`MotorControl_SetPositionSpeedLimit`（记在根目录 notes 第 7 节）。
+  - `shoot.c`：`Shoot_FeederTarget`（返回转速）改成 `Shoot_FeederUpdate`（自己设目标）——位置模式下速度目标由位置环每 5 ms 写，SetTarget 每 1 ms 再写会盖掉。判到卡弹 → `SetMode(POSITION)` + 目标 −`SHOOT_JAM_REVERSE_DEG`；反转中不给目标，离目标 < `SHOOT_JAM_REVERSE_DONE_DEG` 或超过 `SHOOT_JAM_REVERSE_TIMEOUT_MS` → 切回 SPEED、正转、回 NORMAL。离开 FEED 时拨弹轮还在位置模式：退回 SPINUP 切回 SPEED；RELAX 已经是 DISABLE 不管。Init 里拨弹轮填了位置环参数并设了限速。
+  - `shoot_config.h`：删了 `SHOOT_JAM_REVERSE_RPM`、`SHOOT_JAM_REVERSE_MS`；加了 `SHOOT_JAM_REVERSE_DEG` 30（M2006 输出轴度数）、`_DONE_DEG` 3、`_TIMEOUT_MS` 300、`SHOOT_FEEDER_POS_KP/KI/KD` 100 / 0 / 0、`SHOOT_FEEDER_POS_SPEED_LIMIT` 2000 转子 rpm。全是建议值。
+- 验证：Gimbal_test_RS05 ARM 0 警告（text 65836、data 372、bss 10868）；F405_Project、Gimbal_test、Chassis_test 0 警告；CarSim、HostTest 通过。check2 模型补了编码器角度（卡死只挡进弹方向、往回能转），加了场景 20~22：
+  - 14 卡住 300 ms：位置模式 157 ms、往回转到 −27.0°（目标 −30，差 3° 内算到），回正转；16 一直卡死锁成 RELAX；21 反转到一半摩擦轮掉速 → SPINUP、拨弹轮回速度环；22 恢复回 FEED。其余和第二版一样。
+- 上板要看：反转角度 30° 是按 M2006 输出轴算的，拨盘格数、有没有额外传动还不知道；位置环 KP 100 / 限速 2000 没在真电机上试过，拨盘带弹时可能过冲或转不到（转不到会走 300 ms 超时）。起转被误判成卡弹的风险还在（第二版那条）。
+- 没烧、没上板、没提交；can.c 还没生成。
+- 补（2026-11-16）：电机层位置环周期 5 ms 改成 1 ms（和速度环一样，大疆反馈 1 kHz），记在根目录 notes 第 7 节。所有工程 0 警告、CarSim / HostTest 通过；check2 反转 160 ms、到 −26.9°，和 5 ms 时差不多。
+
+## 2026-11-16 发射机构读写脚本 `tools/shoot_watch.py`（用户让 Claude 写）
+
+- 用途：只接发射机构（C 板 CAN2：摩擦轮 ID 1、2，拨弹轮 ID 3）时测 shoot 模块。云台 RS05 不接没关系（云台掉线只锁云台）。做法和 gimbal_watch.py 一样：OpenOCD 不停核读写，地址从 ELF 查；连接、读写内存的代码直接 import gimbal_watch.py 的，自己起的 OpenOCD 日志在 `%TEMP%\shoot_watch_openocd.log`。
+- 命令（一直读的窗口里直接输入，或者 `python C:\Project\RM_Infantry\Test_Module\Gimbal\Gimbal_test_RS05\tools\shoot_watch.py <命令>`）：
+  - `stop`（mode 0，也解锁）、`spin <摩擦轮 rpm>`（写 friction_rpm 再 mode 1）、`fire <拨弹 rpm>`（写 feeder_rpm 再 mode 2）、`set mode|fric|feed <值>`、`once`、`--once`。
+  - 调参：`set fric_kp|fric_ki`（两个摩擦轮一起）、`set feed_kp|feed_ki`、`set feed_pos_kp`。改 Ki 时积分按比例缩放（同 gimbal_watch）。复位后回到 config。
+  - 从无力（指令 mode 0）切到 1 / 2 要输入 y：提醒先核对方向、手离开摩擦轮。
+- 一直读的一行：shoot_test 的 mode/fric/feed，实际模式、锁，两个摩擦轮 rpm / 输出电流 / 反馈几 ms 前，拨弹轮电机层模式 D/S/P、rpm、目标、电流、输出轴角度（位置模式里）、卡弹状态 N/D/R 和次数，摩擦轮就绪计时，CAN2 TEC / LEC。`once` 另有各环 PID、电调电流和温度、提示（掉线按 TEC/LEC 分原因、卡弹锁 / 掉线锁、FEED 没就绪、RELAX 下核对方向、CAN2 的 NART/ABOM 有没有按 .ioc 生成）。
+- 布局：2026-11-16 用 gdb `ptype /o` 核对过 DJI_Motor_t（192 字节）、ShootCmd_t（6）、PID_t（60）；读的 static 变量都在 nm 里（shoot_mode、shoot_fault、feeder_jam_* 等）。开头核对电调 ID 1/2/3、反馈 ID、类型、控制帧 0x200 和槽位、方向 ±1，对不上不写。
+- 验证：B 上假 OpenOCD（`%TEMP%\cubemx_can2_20261115\fakeocd\test_shoot_watch.py`）27 项全过：字段、−15° 角度换算、I 项、确认 y / n、写的地址和位宽（16 位负数补码）、fric_ki 两个电机 + 积分缩放、feed_pos_kp 偏移 104、坏参数被拒、布局不对不写、卡弹锁 / 掉线提示、一直读里输入命令。**没在真板子上跑过。**
+- 用之前：CLion 编译并烧录现在的 Gimbal_test_RS05（带第三版卡弹），`build/Debug/Gimbal_test_RS05.elf` 要和板子里的一样；C 板接 24 V（只接 DAPLink 时 CAN 没有 5 V）。

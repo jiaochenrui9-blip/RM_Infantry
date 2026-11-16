@@ -1,10 +1,10 @@
 #include "motor_control.h"
 
-/* 当前位置-速度串级控制参数。 */
-#define MOTOR_CONTROL_POSITION_PERIOD_MS          5U
+/* 当前位置-速度串级控制参数。位置环和速度环都是 1 ms（大疆电机反馈 1 kHz，2026-11-16 位置环从 5 ms 改成 1 ms）。 */
+#define MOTOR_CONTROL_POSITION_PERIOD_MS          1U
 #define MOTOR_CONTROL_OFFLINE_TIMEOUT_MS        100U
 #define MOTOR_CONTROL_SPEED_PERIOD_S          0.001f
-#define MOTOR_CONTROL_POSITION_PERIOD_S       0.005f
+#define MOTOR_CONTROL_POSITION_PERIOD_S       0.001f
 
 #define MOTOR_CONTROL_ENCODER_COUNTS_PER_REV 8192.0f
 
@@ -76,6 +76,25 @@ void MotorControl_SetTargetDegree(DJI_Motor_t *motor, float target_degree)
     }
 }
 
+float MotorControl_GetDegree(const DJI_Motor_t *motor)
+{
+    if ((motor == NULL) || (motor->position.reference_ready == 0U))
+    {
+        return 0.0f;
+    }
+    return MotorControl_EncoderToOutputDegree(
+        motor, motor->total_encoder - motor->position.zero_encoder);
+}
+
+void MotorControl_SetPositionSpeedLimit(DJI_Motor_t *motor, float limit_rpm)
+{
+    if ((motor != NULL) && (limit_rpm > 0.0f))
+    {
+        motor->position.pid.outMax = limit_rpm;
+        motor->position.pid.outMin = -limit_rpm;
+    }
+}
+
 static void Motor_Offline_Update(DJI_Motor_t* motor)
 {
     if (motor == NULL)
@@ -109,6 +128,13 @@ void MotorControl_SetMode(DJI_Motor_t *motor, MotorControlMode_e mode)
     motor->speed.target_rpm = 0;
     motor->output_current = 0;
     motor->target_current = 0;
+
+    /* 进位置模式时以当前位置为零点：位置目标都是相对“切进来那一刻”的输出轴角度。 */
+    if (mode == MOTOR_MODE_POSITION)
+    {
+        motor->position.zero_encoder = motor->total_encoder;
+        motor->position.reference_ready = 1U;
+    }
 
     motor->mode = mode;
 }

@@ -1,6 +1,6 @@
 # RM_Infantry
 
-RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板控制 RS05 云台、F405 板控制四轮全向底盘。RS05 云台已接入 USB CDC 陀螺仪波形，比赛发射机构已加入卡弹检测、定时反转退弹和连续卡弹锁定。
+RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板控制 RS05 云台、F405 板控制四轮全向底盘。RS05 云台已接入 USB CDC 陀螺仪波形。比赛发射机构卡弹时用位置环反转退弹，连续卡弹会锁定。
 
 ## 目录
 
@@ -33,7 +33,8 @@ cmake --build --preset Debug --clean-first
 
 ## 当前验证进度
 
-- RS05 云台 ARM Debug 全量编译通过。复跑了 19 个主机模型场景，复核了摩擦轮就绪联锁、掉线锁定，以及卡弹反转、持续卡住锁定和解锁恢复。该版未烧录，发射机构未上板验证。
+- RS05 云台、F405 底盘、GM6020 云台和 C 板底盘测试工程的 ARM Debug 全量编译通过。复跑了 22 个发射机构主机模型场景，复核了位置反转、掉速退出和连续卡弹锁定。
+- 发射机构新增 [`shoot_watch.py`](Test_Module/Gimbal/Gimbal_test_RS05/tools/shoot_watch.py) 调试脚本，使用说明见 [RS05 云台笔记](Test_Module/Gimbal/Gimbal_test_RS05/notes.md)。本版未烧录，发射机构和调试脚本均未在真板上验证。
 - CAN2 的自动重发与离线恢复已在 `Gimbal_test_RS05.ioc` 中打开。请在 CubeMX 点 **GENERATE CODE** 后重新编译；当前生成的 `can.c` 里两项仍为 `DISABLE`。
 
 构建输出、IDE 本地状态和历史备份不纳入版本管理；第三方驱动及硬件资料的权利属于各自权利人。

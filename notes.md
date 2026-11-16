@@ -216,6 +216,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-11-03 | 新增 `Shared/Link/chassis_link.c/.h`：从 Chassis_test/App 原样搬来，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，加了 `ChassisLink_SendCmd` 的声明（函数体用户写）。两个工程的 CMake 都加了它和 include 目录 `Shared/Link` | 两个工程清理编译无警告，烧进 Flash 的内容和改之前逐字节相同（Gimbal_test FLASH 36568 B / RAM 3376 B，Chassis_test 20876 B / 2952 B）；云台工程还没调用，chassis_link 整个被链接器裁掉 |
 | 2026-11-03 | `Shared/Link/chassis_link.c` 加云台板发送：`ChassisLink_SendCmd` + `ChassisLink_BuildFrame`（用户写第一版）、`ChassisLink_WriteS16`；按审查改了 vx 高字节、`(int8_t)` → `(uint8_t)`、限幅后 `roundf`、删两个 `sys/` 头文件。接收部分没动 | 两个工程清理编译无警告（Gimbal_test FLASH 37112 B / RAM 3384 B；Chassis_test 不调发送，固件和改之前逐字节相同）；主机测试：往返 9 组、饱和、NULL 都对；未上板 |
 | 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。同日用户想在 CLion 里看到它，Gimbal_test 的 CMake 加了 rs05.c 和 include 目录，还没有代码调用；Chassis_test 没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）。Gimbal_test 加进 CMake 后，烧进 Flash 的内容和加之前逐字节相同，ELF 里没有 RS05 的符号（整个被链接器裁掉）。主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
+| 2026-11-16 | `Shared/Devices/DJI_Driver/motor_control.c/.h`（发射机构卡弹反转用位置模式，用户让 Claude 直接加）：`MotorControl_SetMode` 切到 `MOTOR_MODE_POSITION` 时把当前 `total_encoder` 记成零点（原来只在第一次进位置环时记一次，之后再也不变）；新增 `MotorControl_GetDegree`（当前输出轴角度，相对这个零点）、`MotorControl_SetPositionSpeedLimit`（位置环输出限幅，原来写死 300 转子 rpm，默认值没变）。改之前全仓库没人用位置模式 | Gimbal_test_RS05、F405_Project、Gimbal_test、Chassis_test 清理编译 0 警告；CarSim、HostTest 通过；发射主机检查 22 个场景（模型补了编码器）按预期；未上板 |
+| 2026-11-16 | `motor_control.c`：位置环周期 5 ms → 1 ms（`MOTOR_CONTROL_POSITION_PERIOD_MS` 1、`_PERIOD_S` 0.001），和速度环一样；用户的理由是大疆反馈 1 kHz，不用就浪费。PID 用传入的 dt，KP 不用改。只有发射机构拨弹轮用位置模式 | 4 个 ARM 工程 0 警告；CarSim、HostTest 通过；发射检查 22 个场景按预期（反转 160 ms、到 −26.9°，和 5 ms 时差不多，限速 2000 才是瓶颈）；未上板 |
 
 ## 8. 还没做的（2026-11-04 盘点：机械没好，暂时上不了车）
 
@@ -278,3 +280,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 - 夜里（补）：卡弹第一版完成（用户写状态机，Claude 补了 DETECT 返回值、RELAX 清卡弹次数以便解锁、CLEAR_MS 清零、离开 FEED 复位）。ARM 0 警告，check2 19 个场景按预期。上板要看起转会不会被误判成卡弹。没提交。
 - 深夜（补）：发射机构下一版只做“卡弹反转改成位置模式、转固定角度”，单发 / 连发不做。还没开始；Claude 先改了代码被叫停，已全部撤回（Shared 无改动）。开工前要定 Shared 位置环的零点和限速怎么改，见 Gimbal_test_RS05/notes.md 最后一节。
 - 本次提交收录卡弹检测、定时反转和连续卡弹锁定。重新全量编译 RS05 云台 ARM Debug，零警告。复跑 check2 的 19 个模型场景，复核了反转、持续卡住锁定和解锁恢复。未烧录、未上板。
+- 2026-11-16：发射机构第三版完成（用户让 Claude 直接加）：卡弹反转改成位置模式往回转 30°（M2006 输出轴），转到或 300 ms 超时回正转。Shared 电机层加了位置模式零点、读角度、设限速（见第 7 节）。所有用这个驱动的工程编译 0 警告，CarSim、HostTest 通过，发射检查 22 个场景按预期。没上板、没提交。
+- 2026-11-16：Gimbal_test_RS05 加了发射机构读写脚本 `tools/shoot_watch.py`（stop / spin / fire / set / 调参 / once），只接发射机构就能用；假 OpenOCD 测 27 项全过，没上真板。见 Gimbal_test_RS05/notes.md 最后一节。
+- 2026-11-16 提交前复核：四个受共用电机层改动影响的 ARM 工程全量编译通过，CarSim、HostTest、HostTest_RS05 通过。复跑了 22 个发射机构模型场景，并用新编译的 RS05 ELF 完成 `shoot_watch.py` 的 27 项模拟检查。未烧录、未上板。

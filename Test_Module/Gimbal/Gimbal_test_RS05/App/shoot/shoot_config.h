@@ -21,16 +21,25 @@
 #define SHOOT_FRICTION_READY_HOLD_MS  200U
 
 /* 卡弹（只在实际 FEED、feeder_rpm > 0 时判）：拨弹轮 output_current ≥ JAM_CURRENT 且 speed_rpm < JAM_SPEED_RPM，
-   连续 JAM_DETECT_MS 算卡一次 → 以 JAM_REVERSE_RPM 反转 JAM_REVERSE_MS 再正转。
+   连续 JAM_DETECT_MS 算卡一次 → 切位置模式往回转 JAM_REVERSE_DEG，转到（差 < DONE_DEG）或超时（TIMEOUT_MS）再正转。
    正转顺利跑满 JAM_CLEAR_MS 次数清零；连续卡到 JAM_MAX_COUNT 次就锁住（shoot_fault，给一次 RELAX 才解除）。
-   JAM_CURRENT 必须小于 SHOOT_FEEDER_CURRENT_LIMIT，不然永远判不出来。全是建议值，转速都是转子 rpm（M2006 减速比 36）。 */
+   JAM_CURRENT 必须小于 SHOOT_FEEDER_CURRENT_LIMIT，不然永远判不出来。全是建议值，转速都是转子 rpm（M2006 减速比 36）。
+   角度是 M2006 输出轴（减速后、逻辑方向）的度数；拨盘和输出轴之间如果还有传动，按输出轴算，拨盘格数知道以后再换算。 */
 #define SHOOT_JAM_CURRENT             2700
 #define SHOOT_JAM_SPEED_RPM           300
 #define SHOOT_JAM_DETECT_MS           100U
-#define SHOOT_JAM_REVERSE_RPM         2000
-#define SHOOT_JAM_REVERSE_MS          100U
+#define SHOOT_JAM_REVERSE_DEG         30.0f   /* 8 格拨盘一格 45°，先给 30° */
+#define SHOOT_JAM_REVERSE_DONE_DEG    3.0f
+#define SHOOT_JAM_REVERSE_TIMEOUT_MS  300U    /* 反转本身也被挡住时最多等这么久，回去再卡会再判一次、次数照常加 */
 #define SHOOT_JAM_CLEAR_MS            500U
 #define SHOOT_JAM_MAX_COUNT           3U
+
+/* 拨弹轮位置环（电机层 1 ms 一次，和速度环一样）：输入输出轴角度（度），输出给速度环的目标（转子 rpm）。
+   KP 100：差 20° 以上就顶到限速。POS_SPEED_LIMIT 2000 转子 rpm ≈ 输出轴 55 rpm，30° 约 0.1 s；电机层默认限速只有 300。 */
+#define SHOOT_FEEDER_POS_KP           100.0f
+#define SHOOT_FEEDER_POS_KI           0.0f
+#define SHOOT_FEEDER_POS_KD           0.0f
+#define SHOOT_FEEDER_POS_SPEED_LIMIT  2000.0f
 
 /* 电流限幅是协议原始值：C620 ±16384 = ±20 A，C610 ±10000 = ±10 A。
    第一次上电用小的：摩擦轮 6000（约 7.3 A，只影响起转快慢），拨弹 3000（3 A，卡弹时不至于打坏拨盘）。 */
