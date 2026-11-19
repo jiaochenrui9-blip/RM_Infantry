@@ -57,6 +57,7 @@ RM_Infantry/
 6. 和具体车有关的参数放模块自己的 `xxx_config.h`（电调 ID、方向、编码器中值、限位、PID、限幅）；全车 CAN 分配登记在第 4 节。
 7. 外设一律在 .ioc 里配置后生成代码，不手写初始化代码。CubeMX 也能命令行无界面生成，做法见 Chassis_test/notes.md「工程是怎么建的」。
 8. 改 Shared 里的代码要在这里记一笔，两个测试工程都要重新编译。
+9. 代码注释只写知识：原理、单位、方向、手册出处、实测结论和怎么测的。日期、谁说的 / 谁确认的、第几版怎么改过来的写进 notes.md，不写进代码。
 
 ## 3. 统一单位与正方向
 
@@ -218,6 +219,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 | 2026-11-04 | 新增 `Shared/Devices/RS05/rs05.c/.h`：灵足 RS05 私有协议，只用电流模式。由用户旧 RS05 工程按云台需要重写，和 `C:\Clion\RS05` 里的是同一份；那边的 `can_bus.*` 是本目录 BSP 的拷贝。同日用户想在 CLion 里看到它，Gimbal_test 的 CMake 加了 rs05.c 和 include 目录，还没有代码调用；Chassis_test 没编它 | 两个工程清理编译无警告，FLASH / RAM 和之前相同（Gimbal_test 37112 B / 3384 B，Chassis_test 20876 B / 2952 B）。Gimbal_test 加进 CMake 后，烧进 Flash 的内容和加之前逐字节相同，ELF 里没有 RS05 的符号（整个被链接器裁掉）。主机测试 98 项全过（见 `C:\Clion\RS05\notes.md`）；未上板 |
 | 2026-11-16 | `Shared/Devices/DJI_Driver/motor_control.c/.h`（发射机构卡弹反转用位置模式，用户让 Claude 直接加）：`MotorControl_SetMode` 切到 `MOTOR_MODE_POSITION` 时把当前 `total_encoder` 记成零点（原来只在第一次进位置环时记一次，之后再也不变）；新增 `MotorControl_GetDegree`（当前输出轴角度，相对这个零点）、`MotorControl_SetPositionSpeedLimit`（位置环输出限幅，原来写死 300 转子 rpm，默认值没变）。改之前全仓库没人用位置模式 | Gimbal_test_RS05、F405_Project、Gimbal_test、Chassis_test 清理编译 0 警告；CarSim、HostTest 通过；发射主机检查 22 个场景（模型补了编码器）按预期；未上板 |
 | 2026-11-16 | `motor_control.c`：位置环周期 5 ms → 1 ms（`MOTOR_CONTROL_POSITION_PERIOD_MS` 1、`_PERIOD_S` 0.001），和速度环一样；用户的理由是大疆反馈 1 kHz，不用就浪费。PID 用传入的 dt，KP 不用改。只有发射机构拨弹轮用位置模式 | 4 个 ARM 工程 0 警告；CarSim、HostTest 通过；发射检查 22 个场景按预期（反转 160 ms、到 −26.9°，和 5 ms 时差不多，限速 2000 才是瓶颈）；未上板 |
+| 2026-11-19 | 只改注释：`can_bus.h` 的过滤器分组补上 RS05（CAN1 组 1、CAN2 组 15）和板间 0x110（组 2、16），删了“本工程尚未配置”；`motor_control.c` 删日期；`Attitude.c/.h`、`dji_gm6020.c/.h` 删 CLion 生成的 `Created by` 文件头 | 6 个 ARM 工程清理编译 0 警告，`.bin` 和改前逐字节相同 |
 
 ## 8. 还没做的（2026-11-04 盘点：机械没好，暂时上不了车）
 
@@ -283,3 +285,42 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR}/BSP ...)
 - 2026-11-16：发射机构第三版完成（用户让 Claude 直接加）：卡弹反转改成位置模式往回转 30°（M2006 输出轴），转到或 300 ms 超时回正转。Shared 电机层加了位置模式零点、读角度、设限速（见第 7 节）。所有用这个驱动的工程编译 0 警告，CarSim、HostTest 通过，发射检查 22 个场景按预期。没上板、没提交。
 - 2026-11-16：Gimbal_test_RS05 加了发射机构读写脚本 `tools/shoot_watch.py`（stop / spin / fire / set / 调参 / once），只接发射机构就能用；假 OpenOCD 测 27 项全过，没上真板。见 Gimbal_test_RS05/notes.md 最后一节。
 - 2026-11-16 提交前复核：四个受共用电机层改动影响的 ARM 工程全量编译通过，CarSim、HostTest、HostTest_RS05 通过。复跑了 22 个发射机构模型场景，并用新编译的 RS05 ELF 完成 `shoot_watch.py` 的 27 项模拟检查。未烧录、未上板。
+- 2026-11-17：F405 底盘板第二版网表（`F405_Project/405板子的网表_v2.enet`）检查完，**CAN1 2-pin 插座线序和第一版、C 板反了**（第二版 1 CANH、2 CANL），C620 原装线会 H、L 反接；另有加热电阻功率偏紧。照 C 板移植 BMI088 / ins、加热（TIM3_CH3）、USB CDC 波形：.ioc 和 App 改完，用户用 CubeMX GUI 生成，ARM 清理编译 0 警告（FLASH 63768 B / RAM 11128 B），没上板、没提交。见 F405_Project/notes.md 最后一节。
+
+## 2026-11-17 Power 功率计与 Shared I2C BSP
+
+- 当前进度：新增 Shared/BSP/i2c_bus.c/.h，提供七位设备地址、八位寄存器指针的阻塞读写和高字节在前的十六位访问；Power/App 新增 INA228 初始化、测量反馈与 10 ms 调度。新 BSP 通过工程 main.h 使用 HAL，Power 已验证为 F1；原有其他 Shared 模块的 F4 限制不因此改变。
+- 已验证：用户确认采样电阻为 1 mΩ；CubeMX 6.15.0 已从 .ioc 生成 HSE 8 MHz→PLL 72 MHz、I2C1 400 kHz；Power ARM Debug 全量编译无警告（FLASH 12076 B / RAM 1744 B），七组主机模拟测试通过。原有 Gimbal_test 和 Chassis_test ARM 全量构建通过。
+- 未验证：后续已烧录并通过 OpenOCD 完成无主电源/负载条件下的运行检查，详见下方记录。I2C 实际波形、带电源/负载测量精度及额定载流仍未验证。CAN 已配置为 PB8/PB9、1 Mbps，但尚未启动或验证通信。
+- 对外接口：Power_Init / Power_Update / Power_GetFeedback；反馈包含输入电压、压差、电流、功率、两项 ID、最近成功时间和状态。详见 [Power 笔记](Power/notes.md) 与 [使用说明](Power/README.md)。
+- 注意事项和踩过的坑：R5 网表 Value 与型号冲突，按用户确认的 1 mΩ；采样范围不是整板载流额定值。寄存器逐个读取，负电流须符号扩展，读取失败不覆盖上次样本；初始化失败需重新初始化或复位。CubeMX 生成期间原 .ioc 曾回退，已恢复生成后的配置并核对。
+- 下一步：限流低压上电检查 ID 与 VIN，再接已知负载核对电流、功率；CAN 报文协议及收发后续接入。现有 F405 工作区改动未由本任务修改。
+- 2026-11-17 后续：用户要求 CAN 1 Mbps，已将 Power 的 .ioc 设置为 PB8/PB9 重映射、PCLK1 36 MHz / 分频 3 / BS1 9 / BS2 2 / SJW 1，通过 CubeMX 生成 can.c 并完成 ARM Debug 编译。未烧录、未上板通信。
+- 2026-11-17 上板跟进：用户反馈 Power 已烧录。OpenOCD 只读检查在探针阶段失败：CMSIS-DAPv2 返回 CMD_INFO 响应不匹配，HID 后备接口未找到设备；两次探针连接后停止。未取得目标数据、未复位或重烧；不能据此判定 Power 代码是否正常。待结束其他调试会话、重新插拔 DAPLink 后再读，细节见 Power/notes.md。
+- 2026-11-17 随后用户要求重试：CMSIS-DAPv2 连接成功，Flash 与 Power/build/Debug/Power.elf 全部加载段匹配；INA228 ID=0x5449/0x2281，约 10.4 秒内 282 组稳定反馈均 HAL_OK，观察到 10 ms 更新。用户确认只接调试器、无主电源/负载，VIN 约 2.793～2.801 V、电流 −4.375～+5.625 mA，不据此确认精度。时钟、I2C 400 kHz、CAN 1 Mbps/PB8-PB9 参数已在寄存器核对；CAN 未启动。全程不停核、不复位、不烧录，OpenOCD 已关闭，CPU 保持运行。
+
+## 2026-11-17 Power 单 M3508 速度测试
+
+- 当前进度：Power 引用 Shared/BSP/can_bus、Devices/DJI_Driver 和 Algorithm/PID，不复制驱动；共享 manager 的 CAN2 分支增加条件编译兼容 F103。ID1、CAN1 PB8/PB9 1 Mbps、目标转子 1000 RPM（输出轴约 52.1 RPM），PID 3/10/0，指令电流限幅 ±3000。
+- 已验证：CubeMX 已从 .ioc 生成 CAN RX0 中断优先级 5 与 ABOM；Power 的 Debug/codex-debug ARM 构建通过，FLASH 20316 B / RAM 1976 B；九组主机测试通过；Gimbal_test、Chassis_test 共享驱动增量构建通过。
+- 未验证：最新电机版本未烧录，实际 CAN 通信、速度跟踪、PID 和 SysTick 耗时未验证。之前 Power 实板功率计结论不覆盖本版本。
+- 对外接口：Robot_ControlTick 在 SysTick USER CODE 内每 1 ms 执行控制；Robot_Loop 主循环每 10 ms 读取功率计。参数在 Power/App/motor_config.h；电机只保存 s_motor 一份状态。
+- 注意事项和踩过的坑：无反馈/超时 100 ms 清零，反馈恢复后自动继续 1000 RPM；上电有效反馈后会转。I2C 阻塞读取不进入控制中断；CAN 邮箱忙下一周期发新值，自动重发关闭。重新构建的 Power/build/Debug/Power.elf 不再匹配板上旧固件，VOFA 地址须重新取。未改 F405 的其他工作区改动。
+- 下一步：用户烧录新版后查看 feedback_count 与 speed_rpm，验证 1000 RPM 跟踪和断线恢复；测控制耗时。详见 Power/notes.md 与 README.md。
+
+## 2026-11-19 精简注释（全仓库手写代码）
+
+- 范围：Shared、各工程 App、主机测试（HostTest、HostTest_RS05、CarSim）、Power、tools/*.py、各工程 CMakeLists.txt 里手写的注释。CubeMX 生成的文件、HAL / Middlewares、README 和各 notes.md 没动。
+- 做了什么：只改注释，代码没动。删了注释里的日期、“用户说 / 用户确认 / 用户让 Claude 加”“你选”、第几版怎么改过来的；CLion 生成的 `// Created by game on ...` 文件头全删（17 个文件）。知识点（原理、单位、方向、手册出处、实测结论和测法）都留着。约定写进第 2 节第 9 条。
+- 顺手改的过时说法：`can_bus.h` 的过滤器分组（见第 7 节）；Gimbal_test_RS05 的 `shoot.c` 开头约定按现在的实现合成「控制逻辑」1~4 条，`robot.c`、`shoot_test_cmd.h` 删了“控制骨架零输出”“控制逻辑写完之前不会转”；Gimbal_test 的 CMake 里 RS05 那行改成“本工程不调用”；F405 的 `ins_config.h` 里用户写的 “11.17 实测 0.2f, 0.02f 比较稳定” 并进加热 PI 的注释，删了原来的“占位值”说明。细节见 Gimbal_test_RS05/notes.md 最后一节。
+- 验证：F405_Project、Power、Chassis_test、Gimbal_test、Gimbal_test_RS05、RS05_test 在 `%TEMP%` 清理编译，0 警告，导出的 `.bin` 和改前逐字节相同；HostTest、HostTest_RS05 各 15 过 1 跳过，CarSim 12 过；改过的 Python 脚本语法检查通过。没烧录。
+- 注意：这次是在原有未提交改动（F405 的 USB / ins / I2C / TIM、Power 工程、Shared/BSP/i2c_bus）上直接改的，没有提交；F405_Project/CMakeLists.txt、F405 的 ins 文件里两种改动混在一起。
+
+## 2026-11-19 版本提交前复核
+
+- 当前进度：本版一并收录 F405 的 BMI088 / ins、加热、USB CDC、第二版网表，Power 功率计及单 M3508 测试工程，共用 I2C BSP 与注释整理。README 已补充目录、接线差异及编译烧录说明。
+- 已验证：本轮在临时目录全量编译 F405_Project、Power、Chassis_test、Gimbal_test、Gimbal_test_RS05、RS05_test，均通过且无编译警告；CarSim、HostTest、HostTest_RS05 及 Power 九组主机测试通过，九个 Python 脚本语法检查通过。
+- 未验证：本轮未烧录、未上板；此前 Power 功率计实板结果仅适用于对应旧固件，最新电机控制版本仍待实测。
+- 对外接口：Power_Init / Power_Update / Power_GetFeedback、Robot_ControlTick，以及 Shared/BSP/i2c_bus.h 中的寄存器读写接口，详见 Power/notes.md。
+- 注意事项和踩过的坑：F405 第二版网表 CAN1 插座线序有变化；RS05 云台的 CAN2 自动重发与离线恢复仍需用 CubeMX 生成。AGENTS.txt 和 tools.zip 为本地附件。
+- 下一步：按各工程笔记完成硬件核对、烧录及对应上板验收。

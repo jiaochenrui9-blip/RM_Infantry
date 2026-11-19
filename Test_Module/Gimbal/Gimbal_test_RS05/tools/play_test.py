@@ -7,7 +7,7 @@
     python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/play_test.py
         切模式 1、换硬参数、pitch 放到水平，然后录 45 s：炮管抬到水平、云台变硬以后，轻轻上下扳、再左右扳
     play_test.py --seconds 30 --pitch-deg 0 --yaw-gains 0.025,0.25,8 --pitch-gains 0.02,0.2,12
-- 硬参数是 2026-11-12 模式 1 下试过不振的（yaw 0.025 / 0.25、pitch 0.02 / 0.2 / 12）。**不要在模式 2 下用**（pitch 会振）。
+- 硬参数是模式 1 下试过不振的（yaw 0.025 / 0.25、pitch 0.02 / 0.2 / 12）。**不要在模式 2 下用**（pitch 会振）。
 - 录完不改回去：两个轴留在模式 1、硬参数，方便继续看。要放开：gimbal_watch.py set mode 0；C 板复位后回到 gimbal_config.h。
 - 只能轻扳：电流限幅 1 A（约 0.67 N·m），扳得太狠电机顶不住、编码器会跟着动，结果里会标出来（那些采样不算“定死”）。
 - 保护：编码器转速 400 ms 里换向 6 次以上（每次超过 20°/s，比手扳快得多）算自激，切模式 0。

@@ -4,10 +4,11 @@
 #include "main.h"
 
 /*
- * 过滤器组分配：F407的28个过滤器组由CAN1、CAN2共用，SlaveStartFilterBank = 14，
+ * 过滤器组分配：F4的28个过滤器组由CAN1、CAN2共用，SlaveStartFilterBank = 14，
  * 即CAN1用0~13，CAN2用14~27。
  *   大疆电机（标准帧0x200~0x20F）：CAN1用组0，CAN2用组14（dji_motor_manager.c）
- *   扩展帧设备（如以后接入RS05）：可使用CAN1组1、CAN2组15；本工程尚未配置。
+ *   RS05（扩展帧）：CAN1用组1，CAN2用组15（rs05.c）
+ *   板间通信（标准帧0x110）：CAN1用组2，CAN2用组16（chassis_link.c）
  * 所有过滤器都进FIFO0。同一路CAN上挂了多种设备时（如CAN2上的3508和RS05），
  * 在HAL_CAN_RxFifo0MsgPendingCallback里只读一次FIFO，再把这一帧交给该路上的
  * 每个驱动，各驱动按IDE只处理自己的帧。

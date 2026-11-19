@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/11/1.
-//
-
 #ifndef CHASSIS_TEST_INFANTRY_H
 #define CHASSIS_TEST_INFANTRY_H
 

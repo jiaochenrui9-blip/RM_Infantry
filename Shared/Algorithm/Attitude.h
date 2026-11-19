@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/8/17.
-//
-
 #ifndef BMI088_ATTITUDE_H
 #define BMI088_ATTITUDE_H
 

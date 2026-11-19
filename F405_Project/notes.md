@@ -328,3 +328,37 @@ diff --strip-trailing-cr Test_Module/Chassis/Chassis_test/CMakeLists.txt F405_Pr
     1. 拔掉分电板的 CAN 线再量：恢复了就是分电板或那根线的问题。
     2. 量板上 XT30 的 24 V。
     3. 有 24 V、5 V 还不对，就摸 U1、L1 烫不烫；断电量 CN8 的 1 脚对 GND 的电阻（只有几欧或接近 0 就是短路）。
+
+## 2026-11-17 第二版板子（网表 `405板子的网表_v2.enet`）
+
+### 和第一版的差别（Python 读两份网表逐网络对比）
+
+MCU 引脚分配没变，只多了两处用法；其余是电源、插座。
+- 新增 IMU 加热：PB0（网络名 TIM3_CH3）经 R35 120 Ω 接 Q1（YJL3400A，N 沟道）栅极，R37 10 k 下拉；漏极（网络名 `S`）接 10 个 430 Ω（R17、R26~R34）并联到 5 V。满功率约 5²/43 = 0.58 W，每个电阻约 58 mW。
+- 新增 LED1：阳极接 3.3 V，阴极经 R36 1 k 接 PA15（网络名还叫 SPI3_CS），低电平亮。固件还没配这个脚。
+- 电源：XT30（CN1、CN2、CN4，以及第一版两个脚都没接的 CN6）现在都在 `VCC_BAT_IN`，经 D4（SS54 肖特基）才到板子的 `VCC_BAT`，即防反接只管这块板，穿过 XT30 给云台的那路不经过 D4。5 V 上加了 D3（SMAJ5.0A，TVS 管）。
+- DBUS 插座 H1 换成 CN3（GH 1.25 3P）：1 DBUS、2 GND、3 5V。
+- **CAN1 插座 CN7、CN15 的线序和第一版反了**：第一版 1 CANL、2 CANH（和 C 板、C620 自带的 2-pin 线一样），第二版 1 CANH、2 CANL。见下面「问题」第 1 条。
+
+### 检查出来的问题（还没和设计的队友对过）
+
+1. **CAN1 线序（要改）**：照第二版做，C620 原装 2-pin 线插上就是 H、L 反接，四个电机都不通。除非 PCB 上插座的朝向也跟着转了，否则要改回 1 CANL、2 CANH。
+2. **加热电阻功率偏紧**：每个 0402 约 58 mW，0402 一般额定 1/16 W（62.5 mW），FRC0402 系列的额定以规格书为准。软件里的加热 PID 输出最大是 1（满功率），升温时会长时间满功率；放得下的话换 0603，不然软件限一下最大占空比。
+3. 3.3 V 实际约 3.38 V：SY8089 反馈 R19 52.3 k / R20 11.3 k，0.6 ×（1 + 52.3/11.3）= 3.38 V（SY8089 的 0.6 V 基准以规格书为准）。在 STM32 和 BMI088 的 3.6 V 上限以内，第一版也是这样，不用改。
+4. 和第一版一样只连到 MCU、没接到插座的网络还在：TIM3_CH1/2/4、TIM12_CH1/2、UART3_TX、I2C3、SPI3（PA15 现在接了 LED）。VBUS 还是没接，只插 USB 板子不上电。
+
+### 照 C 板移植（2026-11-17，进行中）
+
+范围：C 板上有、这块板第二版也有的 BMI088 + ins（姿态解算）、IMU 加热、USB CDC 波形（每 20 ms 发板子 z 轴角速度），代码从 Gimbal_test_RS05 搬过来。底盘代码不动，底盘也不用 ins 的结果，在调试器里看 `ins_feedback`。DBUS（没有遥控）、RS485、LED 不做。
+- `.ioc`（照 Gimbal_test_RS05.ioc 的写法加）：
+  - SPI1：PA5 / PA6 / PA7，主机全双工，16 分频 = 5.25 Mbit/s；DMA2 Stream0 收、Stream3 发，中断优先级 5。
+  - GPIO：PA4 `BMI088_ACC_CS`、PC3 `BMI088_GYRO_CS`，都是推挽输出、初始高电平（`main.h` 的宏覆盖 `BMI088.h` 里 C 板的默认片选）；PC0 `BMI088_ACC_DRDY`、PC4 `BMI088_GYRO_DRDY` 输入（代码没用中断）。
+  - TIM3_CH3（PB0）：PWM1，预分频 3、周期 999，84 MHz / 4 / 1000 = 21 kHz，和 C 板 TIM10 的频率一样。
+  - USB_OTG_FS Device_Only（PA11 / PA12）+ USB_DEVICE CDC，OTG_FS 中断优先级 6（比 SPI/DMA 的 5 低，原因见 Gimbal_test_RS05 notes「接入 USB 后 BMI088 采样卡住」）；PLLQ 4 → 7，48 MHz。VBUS 检测保持关。
+  - I2C3（PA8 / PC9）：只是为了让 CubeMX 拷 HAL 的 I2C 文件。`Attitude.h` 引用了 `IST8310.h`，后者直接 include `stm32f4xx_hal_i2c.h`；这个工程只拷用到的库，不开 I2C 就没有这个头文件。这两个脚板上没接东西，不会去读。
+- App：`App/ins/`、`App/USB/` 从 Gimbal_test_RS05 拷来。ins 只改了加热通道（`TIM_CHANNEL_1` → `TIM_CHANNEL_3`）和注释里的坐标系（底盘：x 朝车头、y 朝左、z 朝上），安装矩阵还是单位阵，待标定。`robot.c`：`INS_Init(&hspi1, &htim3)` 放在 CAN 启动前，每周期先 `INS_Update(now)`，加了两个 SPI 回调。`main.c` 的 USER CODE 段加了 `#include "USB.h"`、`Usb_SendGyro()`。CMake 加了 ins、USB、vofa、Attitude、BMI088、IST8310。
+- 第一版板子也能跑这份程序：BMI088 的引脚两版一样，第一版 PB0 没接东西，加热就没有效果，ins 会等满 `INS_HEAT_TIMEOUT_MS`（120 s）才标定。
+- 生成：CubeMX 经 ssh 用命令行生成会停在 `UserAuth ... Internet connection configuration mode` 之后不动（原来那份 .ioc 也一样），改由用户在 B 上用 GUI 生成。第一次 Claude 手写的 .ioc 没把 `PLLQ` 列进 `RCC.IPParameters`，CubeMX 读进去就丢了，生成出来 PLLQ 还是 4（USB 时钟 84 MHz）；以 CubeMX 存回的 .ioc 为底补上 `RCC.PLLQ=7` 再生成，`main.c` 里 PLLQ = 7。以后手改 .ioc，新参数要同时加进该外设的 `IPParameters`。
+- 生成结果核对过：初始化顺序 GPIO → DMA → CAN1 → CAN2 → SPI1 → TIM3 → I2C3 → USB；SPI1 DMA2 Stream0/3、优先级 5；OTG_FS 优先级 6；`vbus_sensing_enable = DISABLE`；TIM3 预分频 3、周期 999、通道 3；`main.h` 有 `BMI088_ACC_CS`（PA4）、`BMI088_GYRO_CS`（PC3）；USER CODE 段（robot、USB）都在。
+- ARM Debug 清理编译 0 警告：FLASH 63768 B，RAM 11128 B（原来底盘程序 21064 B / 2952 B，多出来的是 USB 库、SPI / TIM / I2C 的 HAL 和姿态解算）。**没上板，没提交。**
+- 上板要看的：接 24 V 和 DAPLink，`ins_init_status` 是 0（BMI088 读到 ID）；`ins_bmi088_temp_pid.actual` 升到 40 ℃ 附近稳住（第二版板子才有加热）；`ins_calibrate_count` 到 5000 后 `ins_feedback.valid` 变 1，转车身 yaw 跟着变；插 USB 后电脑出现虚拟串口，VOFA+ 用 JustFloat 能看到 z 轴角速度。底盘照常跑（CAN1 电机、CAN2 收 0x110）。

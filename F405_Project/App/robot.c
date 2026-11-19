@@ -2,11 +2,15 @@
 
 #include "main.h"
 #include "can.h"
+#include "spi.h"
+#include "tim.h"
 
 #include "can_bus.h"
 #include "dji_motor_manager.h"
 #include "Infantry_Chassis.h"
 #include "chassis_link.h"
+#include "BMI088.h"
+#include "ins.h"
 
 /* 每路 CAN 只能有一个 manager，这路上的所有电机都注册进来（见根目录 notes.md 第 2 节）。 */
 static DJI_MotorManager_t robot_can1;
@@ -34,6 +38,10 @@ void Robot_Init(void)
         Error_Handler();
     }
 
+    /* IMU：初始化 BMI088（约 85 ms）、启动加热 PWM（TIM3_CH3）。上电后先升温（要接 24 V），到温后约 5 s 标定零偏和初始姿态，
+       标定期间整车别动。底盘现在不用它的结果，失败也不影响底盘，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
+    (void)INS_Init(&hspi1, &htim3);
+
     if ((DJI_MotorManager_Start(&robot_can1) != HAL_OK) ||
         (DJI_MotorManager_Start(&robot_can2) != HAL_OK))
     {
@@ -53,6 +61,9 @@ void Robot_Loop(void)
         return;
     }
     robot_last_tick = now;
+
+    /* 0. 传感器：IMU 采样和姿态解算。底盘还没用它，结果在调试器里看 ins.c 的 ins_feedback */
+    INS_Update(now);
 
     /* 1. 指令：云台主控经板间 CAN 发来，超时给 RELAX */
     ChassisLink_GetCmd(now, &cmd);
@@ -87,4 +98,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         ChassisLink_ProcessRxFrame(&header, data);
         DJI_MotorManager_ProcessRxFrame(&robot_can2, &header, data);
     }
+}
+
+/* HAL 的 SPI 回调：BMI088 的 DMA 读取靠它往下走（读完加速度计接着读陀螺仪，读完才置 ready），不转就永远没有样本。 */
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    BMI088_SPI_TxRxCpltCallback(hspi);
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+    BMI088_SPI_ErrorCallback(hspi);
 }

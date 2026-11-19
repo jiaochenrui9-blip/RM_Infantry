@@ -93,10 +93,12 @@ HAL_StatusTypeDef DJI_MotorManager_Start(DJI_MotorManager_t *manager)
     {
         filter_bank = 0U;
     }
+#if defined(CAN2)
     else if (manager->hcan->Instance == CAN2)
     {
         filter_bank = 14U;
     }
+#endif
     else
     {
         return HAL_ERROR;

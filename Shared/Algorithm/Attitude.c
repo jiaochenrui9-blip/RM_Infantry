@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/8/17.
-//
-
 #include "Attitude.h"
 
 #include <math.h>

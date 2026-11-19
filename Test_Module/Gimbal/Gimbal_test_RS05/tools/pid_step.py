@@ -80,7 +80,7 @@ def read_config_float(name):
 
 
 class Sampler:
-    """经 DAPLink 读的时间和字数成正比（2026-11-12 实测，gimbal_watch 同时开着：1 个字 2.0 ms、9 个 3.0、44 个 7.8、
+    """经 DAPLink 读的时间和字数成正比（实测，gimbal_watch 同时开着：1 个字 2.0 ms、9 个 3.0、44 个 7.8、
     98 个 15.1）。所以每个采样只读被测的那个轴（44 个字）；模式、指令、IMU、另一个轴的电流每 4 个采样读一次。
     反馈直接用 PID 结构体里的 actual：就是 gimbal.c 当时喂给 PID 的（模式 2 是 IMU，模式 1 是编码器）。
     时间用电机反馈的 tick（RS05 每毫秒回一帧），不另读 uwTick。"""
@@ -138,7 +138,7 @@ class Guard:
         other = "pitch" if self.axis == "yaw" else "yaw"
         tick = s["tick"]
         # 本轴只统计保护开启（armed）以后的采样：阶跃本身加速、刹车会顶限幅一百多毫秒，
-        # 2026-11-12 一开始连开启前的也算进去，10° 阶跃一开启就误报了一次
+        # 连开启前的也算进去的话，10° 阶跃一开启保护就会误报
         self.history.append((tick, armed and abs(s[self.axis]["current"]) >= SAT_RATIO * self.limit,
                              abs(s[other]["current"]) >= SAT_RATIO * self.limit, armed))
         self.history = [h for h in self.history if tick - h[0] <= 300]

@@ -1,6 +1,6 @@
 # RM_Infantry
 
-RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板控制 RS05 云台、F405 板控制四轮全向底盘。RS05 云台已接入 USB CDC 陀螺仪波形。比赛发射机构卡弹时用位置环反转退弹，连续卡弹会锁定。
+RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板控制 RS05 云台、F405 板控制四轮全向底盘。云台与 F405 底盘工程均已接入 BMI088、IMU 加热和 USB CDC 波形。比赛发射机构卡弹时用位置环反转退弹，连续卡弹会锁定。另有 F103 功率计及单 M3508 测试工程。
 
 ## 目录
 
@@ -8,6 +8,7 @@ RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板�
 - `Shared/Devices/`：DJI 电机、BMI088 和 IST8310 驱动。
 - `Shared/Algorithm/`：PID、数学工具与姿态解算。
 - `F405_Project/`：F405 底盘主控固件。
+- `Power/`：STM32F103 + INA228 功率计及单 M3508 速度测试，接线和验证记录见 [Power 说明](Power/README.md)。
 - `Test_Module/Gimbal/Gimbal_test_RS05/`：整车使用的 C 板云台固件。
 - `Test_Module/Gimbal/Gimbal_test/`：基于 STM32F407IGH6 的云台测试工程，包含 CubeMX 配置、应用代码和 CMake 工程。
 - `Test_Module/Chassis/Chassis_test/`：C 板版底盘测试工程。
@@ -18,6 +19,7 @@ RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板�
 
 - 云台 C 板 CAN1 接两个 RS05，并通过板间 CAN 接底盘 F405 的 CAN2。云台 C 板 CAN2 接比赛发射机构的两台 M3508（ID 1、2）和一台 M2006（ID 3）。
 - 底盘 F405 的 CAN1 接四台 C620 + M3508。底盘插座和调试口脚位见 [F405 底盘说明](F405_Project/README.md)，整车供电见 [电源树](docs/整车电源树.svg)。
+- F405 第二版网表中 CAN1 的 2-pin 插座为 1 CANH、2 CANL，与第一版相反。实物接线前须核对，差异见 [第二版板子笔记](F405_Project/notes.md#2026-11-17-第二版板子网表-405板子的网表_v2enet)。
 
 ## 编译与烧录
 
@@ -31,10 +33,13 @@ cmake --build --preset Debug --clean-first
 
 输出为 `build/Debug/Gimbal_test_RS05.elf`。底盘在 `F405_Project` 下用同一套命令构建，输出 `build/Debug/F405_Project.elf`。将 DAPLink 接到对应板子的 SWD 口，再在 CLion 的 OpenOCD 下载配置中选中对应 ELF，运行下载。
 
+Power 工程也使用 Debug 预设，输出 `Power/build/Debug/Power.elf`，下载配置选择 STM32F1 目标。该测试固件收到 ID1 电机有效反馈后会按目标转子 1000 RPM 控制，接线、参数和下载命令见 [Power 说明](Power/README.md)。
+
 ## 当前验证进度
 
 - RS05 云台、F405 底盘、GM6020 云台和 C 板底盘测试工程的 ARM Debug 全量编译通过。复跑了 22 个发射机构主机模型场景，复核了位置反转、掉速退出和连续卡弹锁定。
 - 发射机构新增 [`shoot_watch.py`](Test_Module/Gimbal/Gimbal_test_RS05/tools/shoot_watch.py) 调试脚本，使用说明见 [RS05 云台笔记](Test_Module/Gimbal/Gimbal_test_RS05/notes.md)。本版未烧录，发射机构和调试脚本均未在真板上验证。
 - CAN2 的自动重发与离线恢复已在 `Gimbal_test_RS05.ioc` 中打开。请在 CubeMX 点 **GENERATE CODE** 后重新编译；当前生成的 `can.c` 里两项仍为 `DISABLE`。
+- 2026-11-19 提交前，六个 ARM 工程均全量编译通过且无编译警告，CarSim、HostTest、HostTest_RS05、Power 九组主机测试通过，九个 Python 脚本语法检查通过。本轮未烧录、未上板验证；Power 笔记中的实板功率计结果仅对应此前版本。
 
 构建输出、IDE 本地状态和历史备份不纳入版本管理；第三方驱动及硬件资料的权利属于各自权利人。

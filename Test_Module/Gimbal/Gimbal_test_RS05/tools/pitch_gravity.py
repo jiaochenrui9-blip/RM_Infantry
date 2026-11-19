@@ -71,7 +71,7 @@ def median(values):
 
 def fit(points):
     """最小二乘：G = A·cos θ。points 是 (θ°, G)，返回 (A, 残差 RMS)。
-    不拟合常数偏置：±30° 里 cos 只在 0.87~1 之间变，A 和偏置分不开（2026-11-12 合成数据试过）。"""
+    不拟合常数偏置：±30° 里 cos 只在 0.87~1 之间变，A 和偏置分不开（用合成数据试过）。"""
     cs = [math.cos(math.radians(t)) for t, _ in points]
     gs = [g for _, g in points]
     a = sum(c * g for c, g in zip(cs, gs)) / sum(c * c for c in cs)

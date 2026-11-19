@@ -28,7 +28,7 @@
 - DAPLink 同时只能给一个 OpenOCD 用：CLion 的调试会话开着时这里起不来，先停掉。脚本开着时 CLion 也烧不了，先 Ctrl+C。
 - 变量地址用 arm-none-eabi-nm 从 ELF 里查，ELF 要和板子里的程序是同一次编译的。开头核对变量大小和几个一定成立的数
   （电调 ID 1/2/3、方向 ±1、控制帧 0x200），对不上就报错退出，什么都不写。
-- 结构体布局写死在下面（2026-11-16 用 arm-none-eabi-gdb 的 ptype /o 核对过）：dji_motor.h 的 DJI_Motor_t、
+- 结构体布局写死在下面（用 arm-none-eabi-gdb 的 ptype /o 核对过）：dji_motor.h 的 DJI_Motor_t、
   shoot.h 的 ShootCmd_t、PID.h 的 PID_t。改了要跟着改（大小变了脚本会报错）。
 """
 

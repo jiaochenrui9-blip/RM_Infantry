@@ -30,8 +30,8 @@
 #define SIM_IQ_MAX_A        11.0f                       /* 最大相电流（峰值） */
 #define SIM_J_KGM2          0.005f                      /* 每个轴的转动惯量（假设值，和 GM6020 版一样） */
 #define SIM_FRICTION        0.005f                      /* 粘滞摩擦 N·m·s/rad，作用在相对底盘的转速上（轴承、滑环） */
-/* pitch 水平时的重力矩（N·m），Sim_Reset 的默认值。2026-11-12 车上实测（Gimbal_test_RS05/tools/pitch_gravity.py，
-   按 FF × cos 拟合 0.40 A）× Kt 0.67。gimbal_config.h 的重力前馈改成 0.40 以后，模型里重力还是 0 的话，
+/* pitch 水平时的重力矩（N·m），Sim_Reset 的默认值：车上实测（Gimbal_test_RS05/tools/pitch_gravity.py，
+   按 FF × cos 拟合 0.40 A）× Kt 0.67。要和 gimbal_config.h 的重力前馈对上：前馈不为 0 而模型里重力为 0 的话，
    前馈就成了一直往上推的扰动，软限位、阶跃几个场景会冲过头 */
 #define SIM_PITCH_GRAVITY_NM 0.268f
 #define SIM_RAD_PER_DEG     0.0174532925f
@@ -228,7 +228,7 @@ void Sim_OnCanTxExt(const CAN_HandleTypeDef *hcan, uint32_t ext_id, const uint8_
                 motor->can_timeout = value;
             }
             break;
-        default:    /* 这一版用不到的类型，不回 */
+        default:    /* 驱动用不到的类型，不回 */
             return;
     }
     Sim_MotorReply(motor);

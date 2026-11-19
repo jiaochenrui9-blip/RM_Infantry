@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/8/5.
-//
-
 #ifndef INC_3508_DJI_GM6020_H
 #define INC_3508_DJI_GM6020_H
 

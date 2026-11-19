@@ -54,8 +54,11 @@ endif()
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # 本工程的应用层：装配层（底盘模块的文件在上面 add_executable 里）
     App/robot.c
+    App/ins/ins.c
+    App/USB/USB.c
 
-    # 底盘 v1 用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅
+    # 底盘用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅；
+    # 第二版板子上的 IMU（BMI088 + 姿态解算，Attitude 引用了 IST8310，所以一起编）和 USB 波形
     ${SHARED_DIR}/Link/chassis_link.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor_manager.c
@@ -64,13 +67,21 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${SHARED_DIR}/Algorithm/PID.c
     ${SHARED_DIR}/Algorithm/user_math.c
     ${SHARED_DIR}/BSP/can_bus.c
+    ${SHARED_DIR}/BSP/vofa.c
+    ${SHARED_DIR}/Algorithm/Attitude.c
+    ${SHARED_DIR}/Devices/BMI088/BMI088.c
+    ${SHARED_DIR}/Devices/IST8310/IST8310.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
+    App/ins
+    App/USB
 
     ${SHARED_DIR}/Link
+    ${SHARED_DIR}/Devices/BMI088
+    ${SHARED_DIR}/Devices/IST8310
     ${SHARED_DIR}/Devices/DJI_Driver
     ${SHARED_DIR}/Algorithm
     ${SHARED_DIR}/BSP

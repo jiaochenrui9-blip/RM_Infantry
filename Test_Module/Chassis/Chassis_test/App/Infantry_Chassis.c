@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/11/1.
-//
-
 #include "Infantry_Chassis.h"
 
 #include <math.h>

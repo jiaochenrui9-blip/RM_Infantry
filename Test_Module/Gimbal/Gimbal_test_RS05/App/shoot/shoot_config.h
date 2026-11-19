@@ -16,14 +16,14 @@
 #define SHOOT_OFFLINE_TIMEOUT_MS      50U
 
 /* 摩擦轮就绪：两个摩擦轮的 |目标 − speed_rpm|（speed_rpm 已按方向修正）都小于 ERR，
-   并且连续 HOLD_MS 都这样，才允许拨弹；掉出去一次就重新计时。建议的初值，没实测。 */
+   并且连续 HOLD_MS 都这样，才允许拨弹；掉出去一次就重新计时。初值，没实测。 */
 #define SHOOT_FRICTION_READY_ERR_RPM  200
 #define SHOOT_FRICTION_READY_HOLD_MS  200U
 
 /* 卡弹（只在实际 FEED、feeder_rpm > 0 时判）：拨弹轮 output_current ≥ JAM_CURRENT 且 speed_rpm < JAM_SPEED_RPM，
    连续 JAM_DETECT_MS 算卡一次 → 切位置模式往回转 JAM_REVERSE_DEG，转到（差 < DONE_DEG）或超时（TIMEOUT_MS）再正转。
    正转顺利跑满 JAM_CLEAR_MS 次数清零；连续卡到 JAM_MAX_COUNT 次就锁住（shoot_fault，给一次 RELAX 才解除）。
-   JAM_CURRENT 必须小于 SHOOT_FEEDER_CURRENT_LIMIT，不然永远判不出来。全是建议值，转速都是转子 rpm（M2006 减速比 36）。
+   JAM_CURRENT 必须小于 SHOOT_FEEDER_CURRENT_LIMIT，不然永远判不出来。都是没实测过的初值，转速都是转子 rpm（M2006 减速比 36）。
    角度是 M2006 输出轴（减速后、逻辑方向）的度数；拨盘和输出轴之间如果还有传动，按输出轴算，拨盘格数知道以后再换算。 */
 #define SHOOT_JAM_CURRENT             2700
 #define SHOOT_JAM_SPEED_RPM           300

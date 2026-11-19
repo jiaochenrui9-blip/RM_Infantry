@@ -39,7 +39,7 @@ void Robot_Init(void)
        标定期间整车别动。失败只影响 IMU 模式，原因看 ins.c 里的 ins_init_status（BMI088_Status_t）。 */
     (void)INS_Init(&hspi1, &htim10);
 
-    /* 发射电机先注册和初始化，再启动 CAN2；当前控制骨架保持零输出。 */
+    /* 发射电机先注册和初始化，再启动 CAN2。 */
     if ((DJI_MotorManager_Init(&robot_can2, &hcan2) != HAL_OK) ||
         (Shoot_Init(&robot_can2) != HAL_OK))
     {

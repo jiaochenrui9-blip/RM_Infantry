@@ -7,7 +7,7 @@
  */
 
 /* C620 电调 ID（用 SET 键设）。只能是 1~4：都走 0x200 控制帧。
-   用户 2026-11-11 在整车照片上标的：1 前右、2 后右、3 后左、4 前左（俯视顺时针，从前右开始） */
+   整车上是 1 前右、2 后右、3 后左、4 前左（俯视顺时针，从前右开始） */
 #define CHASSIS_FL_ESC_ID          4U
 #define CHASSIS_FR_ESC_ID          1U
 #define CHASSIS_BR_ESC_ID          2U
@@ -31,7 +31,7 @@
 #define CHASSIS_SPEED_KD           0.0f
 
 /* 尺寸（米），全向轮装在四角、轮轴指向车中心。这台车都待量：
-   轮子半径和用户 ELRS 工程 Omni_Remote.c 一样是 0.076；旋转半径 = 轮心到底盘中心的距离，先用那份代码里的 0.20 */
+   轮子半径和 ELRS 工程 Omni_Remote.c 一样是 0.076；旋转半径 = 轮心到底盘中心的距离，先用那份代码里的 0.20 */
 #define CHASSIS_WHEEL_RADIUS_M     0.076f
 #define CHASSIS_ROTATE_RADIUS_M    0.20f
 
@@ -43,8 +43,7 @@
 #define CHASSIS_FOLLOW_KP          3.0f
 #define CHASSIS_FOLLOW_MAX_DPS     180.0f
 
-/* 小陀螺转速，度/秒，正为俯视逆时针。待调。
-   2026-11-11 第一次上车按每个轮子约 300 转子 rpm 给（用户说先给 300 RPM）：
+/* 小陀螺转速，度/秒，正为俯视逆时针。待调。先按每个轮子约 300 转子 rpm 给：
    转子 rpm = R × ω × CHASSIS_MPS_TO_RPM，R 0.20 时 36°/s ≈ 303 rpm，10 s 转一圈 */
 #define CHASSIS_SPIN_DPS           36.0f
 

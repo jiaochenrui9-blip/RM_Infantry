@@ -20,8 +20,8 @@
 - 边看边改：一直读的时候，直接在同一个窗口里输入命令再回车，比如 set mode 1、add yaw 5、set speed_kp 0.002
   （和上面一样，只是不写前面的 python 和路径），还有 once（打全部字段）。输入的字会和刷新的行混在一起，打完回车就行。
   也可以另开一个终端运行完整的命令，它会连上一直读的那个起的 OpenOCD（127.0.0.1:6666）。
-- 在 PowerShell 提示符下直接敲 set mode 1 不行：PowerShell 把 set 当成它自己的 Set-Variable，不报错、也不碰板子
-  （2026-11-10 踩过）。要么在一直读的窗口里输入，要么写全 python 和脚本路径。
+- 在 PowerShell 提示符下直接敲 set mode 1 不行：PowerShell 把 set 当成它自己的 Set-Variable，不报错、也不碰板子。
+  要么在一直读的窗口里输入，要么写全 python 和脚本路径。
 - 切模式和改目标要分两次：切模式后的第一个循环里，yaw_deg 会被同步成新模式下的当前角（gimbal_test_cmd.c），
   和切模式同时写进去的目标会被覆盖。
 - 变量地址用 arm-none-eabi-nm 从 ELF 里查，ELF 要和板子里的程序是同一次编译的。开头先核对符号的大小，
@@ -56,7 +56,7 @@ DEFAULT_CFG = r"D:\OpenOCD_Config\DAPLink\stm32f4.cfg"
 TCL_TERMINATOR = b"\x1a"
 CAN1_ESR = 0x40006418           # bxCAN 错误状态寄存器：bit2 BOFF、bit6~4 LEC、bit23~16 TEC、bit31~24 REC
 
-# 结构体布局（2026-11-09 用 arm-none-eabi-gdb 的 ptype /o 核对过）。arm-none-eabi-gcc 默认是短枚举：
+# 结构体布局（用 arm-none-eabi-gdb 的 ptype /o 核对过）。arm-none-eabi-gcc 默认是短枚举：
 # GimbalMode_e、ChassisMode_e 都只占 1 字节，所以 gimbal_mode 要按 8 位写，按 32 位写会把后面 3 个字节一起改掉。
 # GimbalTest_t：gimbal_mode, yaw_deg, pitch_deg, chassis_mode, vx_mps, vy_mps, yaw_square_deg, pitch_square_deg, square_period_ms
 TEST_FORMAT = "<BxxxffBxxxffffI"
@@ -309,7 +309,7 @@ def unpack_axis(raw):
 def read_state(ocd, symbols):
     """yaw 的字段放在最外层（yaw_friction.py 也这样用），pitch 的在 s["pitch"] 里，键名和 yaw 一样。"""
     # 先读 tick，紧接着读两个电机（在 gimbal_yaw、gimbal_pitch 里）和 ins 的最后样本时间。经 DAPLink 每读一次要 1~2 ms，
-    # 中间隔的读越多，算出来的“几毫秒前”就越大（2026-11-10 第一版最后才读 tick，正常时也显示 19~20 ms）。
+    # 中间隔的读越多，算出来的“几毫秒前”就越大（最后才读 tick 的话，正常时也显示 19~20 ms）。
     # 时间戳比 tick 新时按 0 算（tick_age）
     tick = ocd.read(symbols["uwTick"][0], 32, 1)[0]
     s = unpack_axis(ocd.read_bytes(*symbols["gimbal_yaw"]))

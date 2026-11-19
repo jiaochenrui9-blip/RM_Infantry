@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/10/29.
-//
-
 #include "ins.h"
 
 #include <math.h>

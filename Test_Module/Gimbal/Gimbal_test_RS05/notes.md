@@ -849,3 +849,10 @@ python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/yaw_fric
 - 布局：2026-11-16 用 gdb `ptype /o` 核对过 DJI_Motor_t（192 字节）、ShootCmd_t（6）、PID_t（60）；读的 static 变量都在 nm 里（shoot_mode、shoot_fault、feeder_jam_* 等）。开头核对电调 ID 1/2/3、反馈 ID、类型、控制帧 0x200 和槽位、方向 ±1，对不上不写。
 - 验证：B 上假 OpenOCD（`%TEMP%\cubemx_can2_20261115\fakeocd\test_shoot_watch.py`）27 项全过：字段、−15° 角度换算、I 项、确认 y / n、写的地址和位宽（16 位负数补码）、fric_ki 两个电机 + 积分缩放、feed_pos_kp 偏移 104、坏参数被拒、布局不对不写、卡弹锁 / 掉线提示、一直读里输入命令。**没在真板子上跑过。**
 - 用之前：CLion 编译并烧录现在的 Gimbal_test_RS05（带第三版卡弹），`build/Debug/Gimbal_test_RS05.elf` 要和板子里的一样；C 板接 24 V（只接 DAPLink 时 CAN 没有 5 V）。
+
+## 2026-11-19 精简注释
+
+- 只改注释，代码没动，ARM 清理编译 0 警告、.bin 和改前逐字节相同，HostTest_RS05 15 过 1 跳过。
+- `shoot.c` 开头按“约定 / 第二版 / 第三版”分段的说明，按现在的实现合成「控制逻辑」1~4 条，删了给写代码的人的建议（“你选”“能合并的自己合并”）和日期。上面各节说的“约定第 4、5 条”就是现在的第 4 条（卡弹检测和位置模式反转）。
+- `gimbal_config.h`：方向、中值、限位、重力前馈、PID 的注释删了日期和“用户确认 / 用户读的 / 用户定”，PID 注释不再重复宏里的数值。中值改写成标法：编码器角 = 方向 × (读数 − 中值)，所以新中值 = 旧中值 + 方向 × 基准位置读到的编码器角（yaw 0 + (−1)(−91°) = +91°，pitch −86° + 18.5° = −67.5°）。原始读数还在本文件「上车」那几节。
+- `shoot_config.h` 的“建议值”改成“没实测过的初值”；`robot.c`、`shoot_test_cmd.h` 删了“当前控制骨架保持零输出”“控制逻辑写完之前改它不会转”。tools/*.py 的说明删了日期和“用户指出”，HostTest_RS05 的 `gimbal_sim.c` 重力矩注释删了日期。

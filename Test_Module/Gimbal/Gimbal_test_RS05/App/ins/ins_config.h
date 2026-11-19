@@ -1,7 +1,3 @@
-//
-// Created by game on 2026/10/29.
-//
-
 #ifndef INS_CONFIG_H
 #define INS_CONFIG_H
 

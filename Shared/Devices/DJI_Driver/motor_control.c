@@ -1,6 +1,6 @@
 #include "motor_control.h"
 
-/* 当前位置-速度串级控制参数。位置环和速度环都是 1 ms（大疆电机反馈 1 kHz，2026-11-16 位置环从 5 ms 改成 1 ms）。 */
+/* 位置-速度串级控制参数。位置环和速度环都是 1 ms（大疆电机反馈 1 kHz）。 */
 #define MOTOR_CONTROL_POSITION_PERIOD_MS          1U
 #define MOTOR_CONTROL_OFFLINE_TIMEOUT_MS        100U
 #define MOTOR_CONTROL_SPEED_PERIOD_S          0.001f

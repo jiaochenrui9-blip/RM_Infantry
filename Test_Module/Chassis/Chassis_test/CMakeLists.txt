@@ -55,7 +55,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # 本工程的应用层：装配层（底盘模块的文件在上面 add_executable 里）
     App/robot.c
 
-    # 底盘 v1 用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅
+    # 底盘用到的公共代码：板间通信（和云台板共用一份）、M3508 驱动、PID、限幅
     ${SHARED_DIR}/Link/chassis_link.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor.c
     ${SHARED_DIR}/Devices/DJI_Driver/dji_motor_manager.c
