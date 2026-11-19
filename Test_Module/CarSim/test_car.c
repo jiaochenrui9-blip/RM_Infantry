@@ -65,6 +65,15 @@ static ChassisMode_e RxMode(void)
     return rx.mode;
 }
 
+/* 底盘板收到的云台相对角，-180~180：和上一周期差超过 180° 就是跨了 ±180°（数值跳 360°） */
+static float RxRel(void)
+{
+    ChassisCmd_t rx;
+
+    Car_ChassisRx(&rx);
+    return rx.gimbal_yaw_rel_deg;
+}
+
 /* ---------------------------------------------------------------- 场景 */
 
 /* 底盘 RELAX：给了速度也不动 */
@@ -324,6 +333,159 @@ static void Test_SpinFastSaturated(void)
     CHECK(speed_max < v_cmd, "应该真的超了上限、被缩小（场景本身没测到想测的）");
 }
 
+/* 小陀螺 + 平移，相对角跨 ±180°：底盘收到的角从 -180 跳到 +180。坐标变换只取 cos / sin，跨的前后
+   对地方向、轮电流每毫秒的变化都应和别处一样。相对角扫过一整圈才一定跨一次，跑 1.5 圈。
+   “附近”取 |相对角| > 170°：全向轮每转 90° 一个样，别处有和它对称的角度，正常时附近的最大值不比别处大 */
+static void Test_SpinWrap(void)
+{
+    const uint32_t run_ms = (uint32_t)(1.5f * 360.0f / fabsf(CHASSIS_SPIN_DPS) * 1000.0f);
+    int16_t current_prev[4];
+    float rel;
+    float rel_prev;
+    float dir_err;
+    float step;
+    float dir_near = 0.0f;      /* 对地速度方向最大偏，|相对角| > 170° 时 */
+    float dir_far = 0.0f;       /* 同上，别处 */
+    float step_near = 0.0f;     /* 4 个轮子电流每毫秒最大变化（原始值），|相对角| > 170° 时 */
+    float step_far = 0.0f;
+    int crossings = 0;
+    uint32_t i;
+    uint8_t k;
+
+    if (!CAR_YAW_UNLIMITED)
+    {
+        SKIP("yaw 有限位（没滑环），不能开小陀螺");
+        return;
+    }
+
+    Car_Reset();
+    SetGimbalMode(GIMBAL_MODE_IMU);
+    gimbal_test.chassis_mode = CHASSIS_MODE_SPIN;
+    gimbal_test.vx_mps = 1.0f;
+    Car_Run(2000U);
+    rel_prev = RxRel();
+    memcpy(current_prev, car.chassis.wheel_current, sizeof(current_prev));
+    for (i = 0U; i < run_ms; i++)
+    {
+        Car_Run(1U);
+        rel = RxRel();
+        crossings += (fabsf(rel - rel_prev) > 180.0f) ? 1 : 0;
+        rel_prev = rel;
+
+        dir_err = fabsf(Math_WrapDeg180(Car_VelocityDir() - Car_GimbalWorldYaw()));
+        step = 0.0f;
+        for (k = 0U; k < 4U; k++)
+        {
+            step = fmaxf(step, fabsf((float)(car.chassis.wheel_current[k] - current_prev[k])));
+        }
+        memcpy(current_prev, car.chassis.wheel_current, sizeof(current_prev));
+
+        if (fabsf(rel) > 170.0f)
+        {
+            dir_near = fmaxf(dir_near, dir_err);
+            step_near = fmaxf(step_near, step);
+        }
+        else
+        {
+            dir_far = fmaxf(dir_far, dir_err);
+            step_far = fmaxf(step_far, step);
+        }
+    }
+    INFO("小陀螺 %.0f °/s + 按 W 1.0 m/s，%.1f s 里相对角跨 ±180° %d 次。|相对角| > 170° 时：对地方向最大偏 %.2f°，"
+         "轮电流每 ms 最大变化 %.0f；别处：%.2f°、%.0f",
+         (double)CHASSIS_SPIN_DPS, (float)run_ms / 1000.0f, crossings, dir_near, step_near, dir_far, step_far);
+    CHECK(crossings >= 1, "相对角没跨过 ±180°（场景本身没测到想测的）");
+    CHECK(dir_near < dir_far + 1.0f, "跨 ±180° 附近平移方向比别处偏得多");
+    /* 100 约 0.12 A。跨的那一拍要是算错了方向，目标转速差上千 rpm，乘速度环 Kp 后电流直接跳到限幅 */
+    CHECK(step_near < step_far + 100.0f, "跨 ±180° 时轮电流跳了");
+}
+
+/* 切到跟随跑 ms 毫秒，返回车头转过的角度（不回绕）。
+   crossings：底盘收到的相对角跨 ±180° 的次数；accel_max：车的最大角加速度 °/s² */
+static float RunFollow(uint32_t ms, int *crossings, float *accel_max)
+{
+    const float heading0 = car.chassis.heading_deg;
+    float wz_prev = car.chassis.wz_dps;
+    float rel_prev = RxRel();
+    float rel;
+    uint32_t i;
+
+    *crossings = 0;
+    *accel_max = 0.0f;
+    gimbal_test.chassis_mode = CHASSIS_MODE_FOLLOW;
+    for (i = 0U; i < ms; i++)
+    {
+        Car_Run(1U);
+        rel = RxRel();
+        *crossings += (fabsf(rel - rel_prev) > 180.0f) ? 1 : 0;
+        rel_prev = rel;
+        *accel_max = fmaxf(*accel_max, fabsf(car.chassis.wz_dps - wz_prev) / 0.001f);
+        wz_prev = car.chassis.wz_dps;
+    }
+    return car.chassis.heading_deg - heading0;
+}
+
+/* 跟随时相对角在 ±180° 附近。跟随是 Kp × 相对角，相对角折在 ±180° 内，就是往近的一边要转的角。
+   ① 不跟随时云台先转到相对 ±179.5°，再切跟随：各往近的一边转（-179.5° 要顺时针转，不能当成 180.5° 逆时针转）。
+   ② 小陀螺中相对角离 ±180° 还差半个刹车距离时切跟随：目标先是反方向，按斜坡减速还没停就被惯性带过 ±180°，
+      底盘收到的角跳 360°、目标换成原方向，接着转过去对齐。目标换号时车的角速度不跳（受斜坡限制） */
+static void Test_FollowWrap(void)
+{
+    const float start_rel[2] = {179.5f, -179.5f};
+    /* 按斜坡从小陀螺转速刹到 0 要转的角 */
+    const float brake_deg = CHASSIS_SPIN_DPS * CHASSIS_SPIN_DPS / (2.0f * CHASSIS_WZ_ACCEL_DPS2);
+    const uint32_t spin_timeout_ms = (uint32_t)(360.0f / fabsf(CHASSIS_SPIN_DPS) * 1000.0f) + 1000U;
+    float rel_switch;
+    float turned;
+    float accel_max;
+    int crossings;
+    uint32_t i;
+    uint8_t k;
+
+    if (!CAR_YAW_UNLIMITED)
+    {
+        SKIP("yaw 有限位（没滑环），云台转不到 ±180°，也不能开小陀螺");
+        return;
+    }
+
+    for (k = 0U; k < 2U; k++)
+    {
+        Car_Reset();
+        SetGimbalMode(GIMBAL_MODE_IMU);
+        gimbal_test.chassis_mode = CHASSIS_MODE_NO_FOLLOW;
+        gimbal_test.yaw_deg = start_rel[k];
+        Car_Run(3000U);
+        rel_switch = RxRel();
+        turned = RunFollow(5000U, &crossings, &accel_max);
+        INFO("不跟随时云台转到相对 %.2f° 再切跟随：车头转了 %+.1f°，跨 ±180° %d 次，最后和云台差 %.2f°",
+             rel_switch, turned, crossings, Math_WrapDeg180(Car_Heading() - Car_GimbalWorldYaw()));
+        CHECK(turned * start_rel[k] > 0.0f, "相对角 %.1f° 时应往近的一边转", start_rel[k]);
+        CHECK(fabsf(Math_WrapDeg180(Car_Heading() - Car_GimbalWorldYaw())) < 1.0f, "最后车头应对准云台");
+    }
+
+    Car_Reset();
+    SetGimbalMode(GIMBAL_MODE_IMU);
+    gimbal_test.chassis_mode = CHASSIS_MODE_SPIN;
+    /* 小陀螺逆时针转（转速为正）时相对角往负走，在 -180° 跨过去；顺时针反过来 */
+    for (i = 0U; i < spin_timeout_ms; i++)
+    {
+        Car_Run(1U);
+        rel_switch = RxRel();
+        if ((rel_switch * CHASSIS_SPIN_DPS < 0.0f) && (fabsf(rel_switch) > 180.0f - 0.5f * brake_deg))
+        {
+            break;
+        }
+    }
+    turned = RunFollow(5000U, &crossings, &accel_max);
+    INFO("小陀螺 %.0f °/s 中相对角到 %.2f° 时切跟随（刹车距离 %.2f°）：跨 ±180° %d 次，之后车头转了 %+.1f°，"
+         "最大角加速度 %.0f °/s²（斜坡 %.0f），最后和云台差 %.2f°",
+         (double)CHASSIS_SPIN_DPS, rel_switch, brake_deg, crossings, turned,
+         accel_max, (double)CHASSIS_WZ_ACCEL_DPS2, Math_WrapDeg180(Car_Heading() - Car_GimbalWorldYaw()));
+    CHECK(crossings >= 1, "跟随时没跨过 ±180°（场景本身没测到想测的）");
+    CHECK(accel_max < CHASSIS_WZ_ACCEL_DPS2 * 1.3f, "跨 ±180° 时角速度跳变");
+    CHECK(fabsf(Math_WrapDeg180(Car_Heading() - Car_GimbalWorldYaw())) < 1.0f, "最后车头应对准云台");
+}
+
 /* 云台在编码器模式下要跟随：云台板降成不跟随，底盘不会一直转（不降级的话会以 跟随Kp × 相对角 一直转） */
 static void Test_FollowNeedsImu(void)
 {
@@ -474,6 +636,8 @@ static const TestCase_t test_cases[] = {
     {"spin_still",         Test_SpinStill,        "原地小陀螺"},
     {"spin_drive",         Test_SpinDrive,        "小陀螺 + 平移"},
     {"spin_fast",          Test_SpinFastSaturated, "小陀螺 + 高速平移（轮速超限等比例缩小）"},
+    {"spin_wrap",          Test_SpinWrap,         "小陀螺 + 平移，相对角跨 ±180°"},
+    {"follow_wrap",        Test_FollowWrap,       "跟随时相对角在 ±180° 附近、跨 ±180°"},
     {"follow_needs_imu",   Test_FollowNeedsImu,   "编码器模式下跟随降成不跟随"},
     {"link_loss",          Test_LinkLoss,         "板间断线 → 无力，接回自动恢复"},
     {"wheel_offline",      Test_WheelOffline,     "轮子掉线锁定"},
