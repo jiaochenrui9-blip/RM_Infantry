@@ -10,6 +10,8 @@
 
 云台工程已由 CubeMX 配置 BMI088 SPI1（PB3 SCK、PB4 MISO、PA7 MOSI）、片选、DMA 和 PC4/PC5 普通输入。2026-10-29 起由 `Gimbal_test/App/ins` 接入：`INS_Init()` 调 `BMI088_Init()`，`INS_Update()` 每 1 ms 处理样本并启动下一次 DMA 采样，前 1000 个样本标定零偏和初始姿态；robot.c 把 HAL 的 SPI 完成 / 出错回调转给本驱动。只做过 ARM 编译和主机模拟，未上板。IST8310 的 I2C3（PA8/PC9）、PG6 复位和 PG3 DRDY 尚未配置，故不能使用磁力计。
 
+陀螺仪数据就绪（DRDY）：`BMI088_Init()` 打开新数据中断并映射到 INT3（推挽、高有效，每个新样本一个 280~400 µs 的高脉冲），三个寄存器也在回读校验里。C 板 INT3 接 PC5、F405 板接 PC4。Gimbal_test_RS05 把 PC5 配成上升沿 EXTI，在 robot.c 里计时；Gimbal_test、F405_Project 的这个脚还是普通输入，没用中断。驱动本身仍按调用 `BMI088_StartSample()` 的时刻读最新样本，不靠 DRDY。
+
 原版 `Attitude_CollectStartupAverage()` 等待 500 帧 BMI088 与 50 帧 IST8310，没有超时；当采样未运行或磁力计不可用时会一直等待。不要在当前工程直接调用该函数。只有 BMI088 时可以 `Attitude_Init()` 后用完整 IMU 样本调用 `Attitude_Update(&imu, NULL, dt_s)`；传入磁力计前需完成其外设和采样接入，统一坐标系并确认有效数据。`dt_s` 应为实际样本时间间隔。
 
 2026-10-27：原始 Attitude 源码两文件与源工程 SHA-256 一致；目标 ARM 编译器单独编译 Attitude 和 IST8310 通过；主机姿态解算及 IST8310 延迟处理模拟通过。完整工程构建因用户云台代码的 Gimbal_Update 声明和定义参数不一致而失败；未烧录或进行实物测试。

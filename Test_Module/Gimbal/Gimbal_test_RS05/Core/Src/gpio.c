@@ -65,11 +65,17 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BMI088_ACC_CS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BMI088_ACC_DRDY_Pin BMI088_GYRO_DRDY_Pin */
-  GPIO_InitStruct.Pin = BMI088_ACC_DRDY_Pin|BMI088_GYRO_DRDY_Pin;
+  /*Configure GPIO pin : BMI088_ACC_DRDY_Pin */
+  GPIO_InitStruct.Pin = BMI088_ACC_DRDY_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(BMI088_ACC_DRDY_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BMI088_GYRO_DRDY_Pin */
+  GPIO_InitStruct.Pin = BMI088_GYRO_DRDY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BMI088_GYRO_DRDY_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BMI088_GYRO_CS_Pin */
   GPIO_InitStruct.Pin = BMI088_GYRO_CS_Pin;
@@ -77,6 +83,10 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BMI088_GYRO_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 }
 

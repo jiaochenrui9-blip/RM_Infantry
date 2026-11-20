@@ -19,6 +19,9 @@
 #define BMI088_GYRO_BANDWIDTH_REG    0x10u
 #define BMI088_GYRO_LPM1_REG         0x11u
 #define BMI088_GYRO_SOFTRESET_REG    0x14u
+#define BMI088_GYRO_INT_CTRL_REG     0x15u
+#define BMI088_GYRO_INT_IO_CONF_REG  0x16u   //INT3_INT4_IO_CONF
+#define BMI088_GYRO_INT_IO_MAP_REG   0x18u   //INT3_INT4_IO_MAP
 
 #define BMI088_SOFTRESET_VALUE       0xB6u
 #define BMI088_ACC_PWR_ACTIVE        0x00u
@@ -26,6 +29,9 @@
 #define BMI088_ACC_CONF_1600HZ_NORMAL 0xACu
 #define BMI088_GYRO_NORMAL_MODE      0x00u
 #define BMI088_GYRO_1000HZ_116HZ     0x02u
+#define BMI088_GYRO_DRDY_ENABLE      0x80u   //bit7：打开新数据中断（陀螺仪默认关着，手册 4.7.2）
+#define BMI088_GYRO_INT3_PP_HIGH     0x0Du   //INT3：bit1 = 0 推挽、bit0 = 1 高有效；INT4 没接，bit3、bit2 保持复位值（开漏）
+#define BMI088_GYRO_DRDY_TO_INT3     0x01u   //bit0：新数据中断接到 INT3
 
 #define BMI088_SPI_READ              0x80u
 #define BMI088_SPI_WRITE             0x7Fu
@@ -278,16 +284,23 @@ uint8_t BMI088_Init(SPI_HandleTypeDef *hspi)
     HAL_Delay(1u);
     BMI088_Gyro_WriteReg(BMI088_GYRO_BANDWIDTH_REG, BMI088_GYRO_1000HZ_116HZ);//设置陀螺仪带宽/采样率
     HAL_Delay(5u);
+    //陀螺仪每存好一个新样本，INT3 输出一个 280~400 us 的高电平脉冲（C 板 INT3 接 PC5）
+    BMI088_Gyro_WriteReg(BMI088_GYRO_INT_IO_CONF_REG, BMI088_GYRO_INT3_PP_HIGH);
+    BMI088_Gyro_WriteReg(BMI088_GYRO_INT_IO_MAP_REG, BMI088_GYRO_DRDY_TO_INT3);
+    BMI088_Gyro_WriteReg(BMI088_GYRO_INT_CTRL_REG, BMI088_GYRO_DRDY_ENABLE);
     //判断是否是就绪状态
     if (BMI088_IO_OK == 0u)
     {
         return BMI088_ERR_SPI;
     }
-    //回读配置寄存器，确认真的写进去了
+    //回读配置寄存器，确认真的写进去了（掩码只留手册定义了的位）
     if (BMI088_Acc_ReadReg(BMI088_ACC_CONF_REG) != BMI088_ACC_CONF_1600HZ_NORMAL ||
         (BMI088_Acc_ReadReg(BMI088_ACC_RANGE_REG) & 0x03u) != BMI088_ACC_RANGE_SETTING ||
         (BMI088_Gyro_ReadReg(BMI088_GYRO_RANGE_REG) & 0x07u) != BMI088_GYRO_RANGE_SETTING ||
-        (BMI088_Gyro_ReadReg(BMI088_GYRO_BANDWIDTH_REG) & 0x07u) != BMI088_GYRO_1000HZ_116HZ)
+        (BMI088_Gyro_ReadReg(BMI088_GYRO_BANDWIDTH_REG) & 0x07u) != BMI088_GYRO_1000HZ_116HZ ||
+        (BMI088_Gyro_ReadReg(BMI088_GYRO_INT_CTRL_REG) & 0xC0u) != BMI088_GYRO_DRDY_ENABLE ||
+        (BMI088_Gyro_ReadReg(BMI088_GYRO_INT_IO_CONF_REG) & 0x0Fu) != BMI088_GYRO_INT3_PP_HIGH ||
+        (BMI088_Gyro_ReadReg(BMI088_GYRO_INT_IO_MAP_REG) & 0xA5u) != BMI088_GYRO_DRDY_TO_INT3)
     {
         return (BMI088_IO_OK != 0u) ? BMI088_ERR_CONFIG : BMI088_ERR_SPI;
     }
