@@ -4,27 +4,35 @@
 原理（统计采样，和电脑上的 perf 一样）：
 - 经 OpenOCD 反复读 DWT_PCSR（0xE000101C）：读一次返回内核刚执行过的一条指令的地址，内核照常跑。
   读几万次，落在哪个函数里的比例就是这个函数占 CPU 时间的比例。经 DAPLink 每秒约读 500 次。
-- 同一次还读 DWT_CYCCNT（CPU 周期计数，脚本开头打开，结束时恢复原样）：对 SysTick 的一拍（LOAD + 1 个周期）
-  取余，就是这个样本落在 1 ms 里的哪个位置。用它把 1 ms 里各个位置的样本数拉平（经 USB 读的时刻可能和
-  1 ms 有关联），也用来画时间线（--timeline）。
+- 同一次还读 DWT_CYCCNT（CPU 周期计数，脚本开头打开，结束时恢复原样），用来定这个样本落在一拍里的哪个位置（相位）。
+  用相位把一拍里各个位置的样本数拉平（经 USB 读的时刻可能和拍有关联），也用来画时间线（--timeline）。
+  - 固件里有 ins_sample_us（第 1 步以后，Robot_Loop 跟着陀螺仪 DRDY 跑）：一拍是一个 DRDY 周期，零点放在 DRDY。
+    每采 GRID_EVERY 个样本顺手读一次 TIM2 和 ins_sample_us（固件记的 DRDY 时刻），连成 DRDY 时刻表：数出每两次读
+    之间隔了几个 DRDY，拟合间隔，再跟上随温度慢慢漂的那部分。TIM2 和 CYCCNT 出自同一个 PLL，正好 168 个周期 1 us，
+    只差一个固定的偏移：读 TIM2 比读 CYCCNT 晚一个 USB 往返，只拿来粗对（准到 10 ms 以内就够，那段时间里 DRDY 的
+    相位只漂零点几 ns），剩下的整体平移按 EXTI（DRDY）中断最早开始的地方归零。
+  - 没有时（旧固件、旧样本文件、DRDY 没来在按 tick 跑）：一拍是 SysTick 的 LOAD + 1 个周期（1 ms），零点放在 SysTick。
 - 归类：nm 查地址落在哪个函数里；objdump 里的 bl / b 是直接调用，从这个函数往上找“根”（中断入口、
   Robot_Loop 和 INS_Update 直接调的各个函数），找到哪个根就算谁的。几个根都调的单列成“共用”。
   只经函数指针调的（HAL 的 DMA 完成回调、USB 类的回调）按名字归到对应的中断。只在上电初始化时跑的不算。
-- 空转：main 的 while(1)、HAL_GetTick、Robot_Loop 和 Usb_SendGyro 开头“比较 tick、没到就 return”那几行
-  （按 addr2line 的行号分）。Robot_Loop 正忙的那段时间里采到的 HAL_GetTick（比如 INS 阻塞读温度时查超时）
-  按相位算回 Robot_Loop。
+- 空转：main 的 while(1)、Robot_Loop 和 Usb_SendGyro 开头“判断、没到就 return”那几行（按 addr2line 的行号分），
+  以及轮询时调的几个小函数（POLL_HELPERS：HAL_GetTick、INS_IsSampleReady 等）。这几个小函数 INS 处理样本、
+  读温度查超时时也调：落在 Robot_Loop 正忙的相位里的，算回 Robot_Loop。
 
 用法（板子里是同一次编译的程序、正在跑；CLion 用 Run 烧录，不开调试会话）：
     python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/cpu_profile.py
 下面简写成 cpu_profile.py：
     cpu_profile.py --seconds 120    采样时长，默认 60 s。样本越多越准，打出来的表头有误差大概多少
-    cpu_profile.py --timeline       另外打 1 ms 里的时间线：每 10 us 一格，这一格里 CPU 主要在干什么
+    cpu_profile.py --timeline       另外打一拍里的时间线：每 10 us 一格，这一格里 CPU 主要在干什么
     cpu_profile.py --load 文件      不连板子，重新分析之前存下的样本（每次采样都存到 %TEMP%/cpu_profile/）
 
 表里的数：
-- 占比：这一项占 CPU 时间的比例；每拍 us = 占比 × 1 ms（一拍 1 ms）。
-- 每秒次数、每次 us：知道次数的才有。Robot_Loop 数 robot_loop_new_samples，EXTI 数 robot_drdy_count，
-  SysTick 数 uwTick，大疆电机的 CAN 帧数 feedback_count；RS05 没有计数，按“每拍一问一答、在线的各 1000 帧/s”估。
+- 占比：这一项占 CPU 时间的比例；每拍 us = 占比 × 一拍（DRDY 零点时是一个 DRDY 周期，约 1000.34 us；SysTick 零点时 1 ms）。
+- 每秒次数、每次 us：知道次数的才有。SysTick 数 uwTick；Robot_Loop、EXTI 在 DRDY 零点时按每个 DRDY 一次算，
+  SysTick 零点时按每 ms 一次算。烧的是带第 0 步测量代码的程序（提交 d92bde5）时，改用 robot_loop_new_samples、
+  robot_drdy_count 数。大疆电机的 CAN 帧按 feedback_count 数；RS05 没有计数，按“每拍一问一答、在线的各 1000 帧/s”估。
+- DRDY 之后多久轮到（DRDY 零点时才有）：每一项的样本落在 DRDY 之后多少 us，取 1 %、50 %、99 % 分位。
+  一个函数每拍从 s 跑到 s + d 的话，它的样本均匀落在这一段里，所以 1 % 分位约等于最早开始的时刻、99 % 约等于最晚结束的时刻。
 - 读到 0xFFFFFFFF（内核这时给不出地址）或者不在任何函数里的样本算“无效”，单列。
 - CLion 的 Debug 是 -O0，比优化后的程序慢。没接电机时两路 CAN 收不到帧，“CAN 接收”是 0；发送邮箱一直满着，
   各个 SendAll 比接电机时省事。
@@ -37,6 +45,7 @@
 import argparse
 import bisect
 import json
+import math
 import os
 import re
 import shutil
@@ -56,6 +65,12 @@ DEMCR = 0xE000EDFC              # bit24 TRCENA：DWT 要它打开才工作（Ope
 DWT_CTRL = 0xE0001000           # bit0 CYCCNTENA
 DWT_CYCCNT = 0xE0001004         # 从这里连读 7 个字，第 7 个是 DWT_PCSR（0xE000101C）
 SYST_LOAD = 0xE000E014
+TIM2_CNT = 0x40000024           # 固件的 1 MHz 时间戳（ins_sample_us 用的就是它）
+CYCLES_PER_US = 168             # CYCCNT 是 168 MHz 的内核时钟；TIM2 是 84 MHz / 84，同一个 PLL
+GRID_EVERY = 25                 # 每采这么多个 PC 样本，读一次 TIM2 和 ins_sample_us（DRDY 时刻表），约 45 ms 一次
+DRDY_GUESS_US = 1e6 / 999.66    # 上板量过的 DRDY 间隔，只用来数两次读之间隔了几个 DRDY（随后用时刻表自己拟合）
+GRID_SMOOTH = 10                # DRDY 相位的慢漂：时刻表残差前后各取这么多个点求中位数（约 ±0.45 s）
+GRID_OUTLIER_US = 20.0          # 时刻表里离慢漂超过这么多的点不用（那次 EXTI 中断晚了，第 0 步见过晚 46.5 us 的）
 FLASH_BASE = 0x08000000
 FLASH_END = 0x08100000
 INVALID_PC = 0xFFFFFFFF
@@ -69,9 +84,12 @@ INS = LOOP + ("INS_Update",)
 CAN = ("中断", "CAN 接收")
 SPI = ("中断", "SPI1、DMA2（BMI088 读完）")
 USB = ("中断", "USB")
+EXTI = ("中断", "EXTI（DRDY）")
 INIT = ("初始化（上电时跑一次）",)
 INVALID = ("无效样本",)
-LOOP_GETTICK = LOOP + ("HAL_GetTick（Robot_Loop 里调的）",)
+# 轮询时调的小函数：默认算空转，落在 Robot_Loop 正忙的相位里的算回 Robot_Loop（INS 处理样本、读温度查超时也调它们）。
+# Robot_NowUs 在 EXTI 中断里也调一次，那几条指令也算成了空转，每拍约 0.1 us，不管
+POLL_HELPERS = ("HAL_GetTick", "INS_IsSampleReady", "BMI088_IsSampleReady", "INS_GetSampleUs", "Robot_NowUs")
 ROOTS = {
     "CAN1_RX0_IRQHandler": CAN,
     "CAN1_RX1_IRQHandler": CAN,
@@ -81,16 +99,16 @@ ROOTS = {
     "DMA2_Stream0_IRQHandler": SPI,
     "DMA2_Stream3_IRQHandler": SPI,
     "SPI1_IRQHandler": SPI,
-    "EXTI9_5_IRQHandler": ("中断", "EXTI（DRDY 计时）"),
+    "EXTI9_5_IRQHandler": EXTI,
     "OTG_FS_IRQHandler": USB,
     "SysTick_Handler": ("中断", "SysTick"),
     "main": IDLE,
-    "HAL_GetTick": IDLE,
     "Robot_Loop": LOOP + ("Robot_Loop 自身",),
     "Usb_SendGyro": ("主循环", "Usb_SendGyro（每 20 ms 发一次）"),
     "Robot_Init": INIT,
     "Reset_Handler": INIT,
 }
+ROOTS.update({name: IDLE for name in POLL_HELPERS})
 INIT_RE = re.compile(r"^(HAL_Init|SystemClock_Config|MX_\w+_Init|SystemInit|__libc_init_array)$")
 # 只经函数指针调、objdump 里找不到调用者的，按名字归
 POINTER_ROOTS = ((re.compile(r"^SPI_DMA|^HAL_SPI_\w*Callback$"), SPI),
@@ -104,7 +122,7 @@ FUNC_RE = re.compile(r"^([0-9a-f]{8}) <(.+)>:$")
 BRANCH_RE = re.compile(r"^\s*[0-9a-f]+:\s+b\S*\s+([0-9a-f]+) <[^>]+>\s*$")
 LOCATION_RE = re.compile(r"^(.*):(\d+)(?: \(discriminator \d+\))?$")   # addr2line 的“文件:行号”
 
-SYMBOLS = ("uwTick", "robot_drdy_count", "robot_loop_new_samples", "ins_feedback",
+SYMBOLS = ("uwTick", "robot_drdy_count", "robot_loop_new_samples", "ins_feedback", "ins_sample_us",
            "shoot_friction_1", "shoot_friction_2", "shoot_feeder", "gimbal_yaw", "gimbal_pitch")
 DJI_MOTORS = ("shoot_friction_1", "shoot_friction_2", "shoot_feeder")
 RS05_AXES = ("gimbal_yaw", "gimbal_pitch")
@@ -281,8 +299,10 @@ def read_u32(ocd, address):
 
 
 def read_counts(ocd, data):
-    c = {"tick": read_u32(ocd, data["uwTick"][0]), "drdy": read_u32(ocd, data["robot_drdy_count"][0]),
-         "loops": sum(ocd.read(data["robot_loop_new_samples"][0], 32, 3)) & U32}
+    c = {"tick": read_u32(ocd, data["uwTick"][0])}
+    if "robot_drdy_count" in data and "robot_loop_new_samples" in data:   # 只有第 0 步测量代码那次编译有
+        c["drdy"] = read_u32(ocd, data["robot_drdy_count"][0])
+        c["loops"] = sum(ocd.read(data["robot_loop_new_samples"][0], 32, 3)) & U32
     if all(name in data for name in DJI_MOTORS + RS05_AXES):
         c["dji"] = sum(read_u32(ocd, data[name][0] + DJI_COUNT_OFFSET) for name in DJI_MOTORS) & U32
         c["rs05_ticks"] = [read_u32(ocd, data[name][0] + RS05_TICK_OFFSET) for name in RS05_AXES]
@@ -311,9 +331,8 @@ def collect(ocd, elf, seconds):
     """在板子上采样，返回 (样本 [(cyccnt, pc)], 附带信息)。"""
     check_flash(ocd, elf.path)
     data = elf.data
-    missing = [name for name in ("uwTick", "robot_drdy_count", "robot_loop_new_samples") if name not in data]
-    if missing:
-        sys.exit(f"ELF 里没有 {', '.join(missing)}（是 Gimbal_test_RS05 加了第 0 步测量的那次编译吗）")
+    if "uwTick" not in data:
+        sys.exit("ELF 里没有 uwTick（是 Gimbal_test_RS05 的 ELF 吗）")
     first = read_counts(ocd, data)
     time.sleep(0.2)
     if read_u32(ocd, data["uwTick"][0]) == first["tick"]:
@@ -328,11 +347,13 @@ def collect(ocd, elf, seconds):
         ocd.write(DEMCR, 32, [demcr | (1 << 24)])
     ctrl = read_u32(ocd, DWT_CTRL)
     ocd.write(DWT_CTRL, 32, [ctrl | 1])
+    grid_address = data["ins_sample_us"][0] if "ins_sample_us" in data else None
     try:
         period = read_u32(ocd, SYST_LOAD) + 1
         start = read_counts(ocd, data)
         print(f"开始采样 {seconds:.0f} s（Ctrl+C 提前结束）……", flush=True)
         samples = []
+        grid = []       # [第几个样本之后读的, TIM2, ins_sample_us]
         errors = failed_in_row = 0
         t0 = time.time()
         report = t0 + 10.0
@@ -351,6 +372,11 @@ def collect(ocd, elf, seconds):
                     continue
                 failed_in_row = 0
                 samples.append((words[0], words[6]))
+                if grid_address is not None and len(samples) % GRID_EVERY == 0:
+                    try:
+                        grid.append([len(samples) - 1, read_u32(ocd, TIM2_CNT), read_u32(ocd, grid_address)])
+                    except RuntimeError:
+                        errors += 1
                 if time.time() >= report:
                     print(f"  已采 {len(samples)} 个（{time.time() - t0:.0f} s）", flush=True)
                     report += 10.0
@@ -365,9 +391,11 @@ def collect(ocd, elf, seconds):
         except RuntimeError:
             print("DWT_CTRL 没写回原值（CYCCNT 会一直开着，对程序没影响）。", flush=True)
     ms = (end["tick"] - start["tick"]) & U32
-    meta = {"period": period, "ms": ms, "read_errors": errors,
-            "loops": (end["loops"] - start["loops"]) & U32, "drdy": (end["drdy"] - start["drdy"]) & U32,
+    meta = {"period": period, "ms": ms, "read_errors": errors, "grid": grid,
             "elf": elf.path, "elf_mtime": os.path.getmtime(elf.path), "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if "loops" in end:
+        meta["loops"] = (end["loops"] - start["loops"]) & U32
+        meta["drdy"] = (end["drdy"] - start["drdy"]) & U32
     if "dji" in end:
         meta["dji"] = (end["dji"] - start["dji"]) & U32
         meta["rs05_online"] = sum(1 for t in end["rs05_ticks"] if t and ((end["tick"] - t) & U32) < 20)
@@ -394,10 +422,13 @@ def unwrap(samples):
     return out
 
 
-def classify(elf, samples, period):
-    """每个样本归到哪一组；Robot_Loop 正忙的相位格里采到的 HAL_GetTick 算回 Robot_Loop。"""
-    cycles = unwrap(samples)
-    bins = [(c % period) * PHASE_BINS // period for c in cycles]
+def sd(a, b):
+    """a − b 按 32 位有符号算。"""
+    return ((a - b + 0x80000000) & U32) - 0x80000000
+
+
+def base_groups(elf, samples):
+    """每个样本按函数归组。轮询用的小函数这时都算空转，有了相位以后由 assign_poll_helpers 再分。"""
     starts = [elf.find(pc) if pc != INVALID_PC else None for _, pc in samples]
     groups = []
     for (_, pc), start in zip(samples, starts):
@@ -407,18 +438,113 @@ def classify(elf, samples, period):
             groups.append(IDLE)
         else:
             groups.append(elf.group[start])
-    # 每个 2 us 的相位格里，主循环是在 Robot_Loop 里忙（干活的样本比空转的多）还是在空转
-    gettick = {s for s in elf.starts if elf.name(s) == "HAL_GetTick"}
-    fine = [(c % period) * BUSY_BINS // period for c in cycles]
+    return starts, groups
+
+
+def systick_phases(samples, period):
+    """每个样本在 SysTick 一拍里的位置（0~1）。零点不定，画时间线时取 SysTick 样本最多的那一格。"""
+    return [(c % period) / period for c in unwrap(samples)]
+
+
+def running_median(values, half):
+    out = []
+    for i in range(len(values)):
+        window = sorted(values[max(0, i - half):i + half + 1])
+        out.append(window[len(window) // 2])
+    return out
+
+
+def fit_line(xs, ys):
+    """最小二乘 y = a + b·x，返回 (a, b)。"""
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+    return my - b * mx, b
+
+
+def drdy_phases(samples, groups, meta):
+    """按 DRDY 时刻表算每个样本在 DRDY 周期里的位置（0~1），零点是 EXTI（DRDY）中断最早开始的地方。
+    返回 (相位, 周期 us, 说明)；用不了时返回 (None, None, {"reason": 原因})。"""
+    grid = meta.get("grid") or []
+    if len(grid) < 3 * GRID_SMOOTH:
+        return None, None, {"reason": "没有 DRDY 时刻表：固件里没有 ins_sample_us，或者是旧的样本文件"}
+    cycles = unwrap(samples)
+    tim2, drdy, cyc = [], [], []
+    total, previous = 0, grid[0][1]
+    for index, t, s in grid:
+        total += (t - previous) & U32
+        previous = t
+        tim2.append(total)
+        drdy.append(total - sd(t, s))       # 先读 TIM2、后读样本时刻：样本时刻可能比读到的 TIM2 新
+        cyc.append(cycles[index])
+    if drdy[-1] - drdy[0] < 0.5 * (tim2[-1] - tim2[0]):
+        return None, None, {"reason": "样本时刻几乎没变：DRDY 没来，Robot_Loop 在按 tick 跑"}
+
+    # 两次读之间隔了几个 DRDY：先按大概的间隔数，拟合出间隔以后再数一遍（隔得久的两次读，按大概的间隔可能数差一个）
+    period = DRDY_GUESS_US
+    for _ in range(2):
+        k = [0]
+        for a, b in zip(drdy, drdy[1:]):
+            k.append(k[-1] + round((b - a) / period))
+        origin, period = fit_line(k, drdy)
+    # 残差 = 相位随温度的慢漂 + 中断延迟。离滑动中位数太远的点（那次中断晚了）去掉，剩下的再取一次滑动中位数当慢漂
+    residual = [d - (origin + period * n) for d, n in zip(drdy, k)]
+    first = running_median(residual, GRID_SMOOTH)
+    kept = [(n, r) for n, r, m in zip(k, residual, first) if abs(r - m) <= GRID_OUTLIER_US]
+    kept_k = [n for n, _ in kept]
+    drift = running_median([r for _, r in kept], GRID_SMOOTH)
+
+    # CYCCNT 换成 TIM2 的 us：t = (CYCCNT + offset) / 168。offset 用每次读的 TIM2 粗估（取中位数），准到 10 ms 以内就行
+    offsets = sorted(CYCLES_PER_US * t - c for t, c in zip(tim2, cyc))
+    offset = offsets[len(offsets) // 2]
+    tau = []
+    for c in cycles:
+        t = (c + offset) / CYCLES_PER_US
+        x = (t - origin) / period
+        j = bisect.bisect_left(kept_k, x)
+        if j <= 0:
+            r = drift[0]
+        elif j >= len(kept_k):
+            r = drift[-1]
+        else:
+            r = drift[j - 1] + (drift[j] - drift[j - 1]) * (x - kept_k[j - 1]) / (kept_k[j] - kept_k[j - 1])
+        n = math.floor((t - origin - r) / period)
+        tau.append(t - (origin + period * n + r))
+
+    # 零点：EXTI 中断的样本在一拍里聚成一小段（在圆周上求它的中心，免得正好跨过一拍的头尾），取 1 % 分位
+    exti = [t for t, g in zip(tau, groups) if g == EXTI]
+    if len(exti) < 20:
+        return None, None, {"reason": f"EXTI（DRDY）中断的样本只有 {len(exti)} 个，定不了零点"}
+    angle = math.atan2(sum(math.sin(2 * math.pi * t / period) for t in exti),
+                       sum(math.cos(2 * math.pi * t / period) for t in exti))
+    center = angle / (2 * math.pi) * period
+    rel = sorted((t - center + period / 2) % period - period / 2 for t in exti)
+    zero = center + rel[len(rel) // 100]
+    phases = [((t - zero) % period) / period for t in tau]
+    scatter = [r - m for (_, r), m in zip(kept, drift)]
+    late = sorted(r - m for r, m in zip(residual, first) if r - m > GRID_OUTLIER_US)
+    info = {"grid": len(grid), "outliers": len(grid) - len(kept), "late": len(late),
+            "late_us": late[len(late) // 2] if late else 0.0,
+            "scatter_us": (sum(x * x for x in scatter) / len(scatter)) ** 0.5,
+            "drift_us": max(drift) - min(drift),
+            "offset_spread_us": (offsets[len(offsets) * 9 // 10] - offsets[len(offsets) // 10]) / CYCLES_PER_US,
+            "exti": len(exti), "exti_width_us": rel[len(rel) * 99 // 100] - rel[len(rel) // 100]}
+    return phases, period, info
+
+
+def assign_poll_helpers(elf, starts, groups, phases):
+    """轮询用的小函数：所在的相位格里 Robot_Loop 在忙（干活的样本比空转的多）就算回 Robot_Loop，不然是空转。"""
+    helpers = {s for s in elf.starts if elf.name(s) in POLL_HELPERS}
+    fine = [min(int(p * BUSY_BINS), BUSY_BINS - 1) for p in phases]
     busy = [0] * BUSY_BINS
     for start, group, b in zip(starts, groups, fine):
-        if start in gettick:
+        if start in helpers:
             continue
         if group[:2] == LOOP:
             busy[b] += 1
         elif group == IDLE:
             busy[b] -= 1
-    # 格里只有 HAL_GetTick、判断不了的，往两边相邻的格看
+    # 格里只有这几个小函数、判断不了的，往两边相邻的格看
     decided = []
     for b in range(BUSY_BINS):
         score, k = busy[b], 0
@@ -427,9 +553,8 @@ def classify(elf, samples, period):
             score = busy[(b - k) % BUSY_BINS] + busy[(b + k) % BUSY_BINS]
         decided.append(score > 0)
     for i, (start, b) in enumerate(zip(starts, fine)):
-        if start in gettick and decided[b]:
-            groups[i] = LOOP_GETTICK
-    return groups, bins, starts
+        if start in helpers and decided[b]:
+            groups[i] = LOOP + (f"{elf.name(start)}（Robot_Loop 里调的）",)
 
 
 def weights_of(bins):
@@ -442,9 +567,13 @@ def weights_of(bins):
 
 
 def analyze(elf, samples, meta, timeline):
-    period = meta["period"]
-    period_us = 1000.0
-    groups, bins, starts = classify(elf, samples, period)
+    starts, groups = base_groups(elf, samples)
+    phases, period_us, info = drdy_phases(samples, groups, meta)
+    drdy = phases is not None
+    if not drdy:
+        phases, period_us = systick_phases(samples, meta["period"]), meta["period"] / CYCLES_PER_US
+    assign_poll_helpers(elf, starts, groups, phases)
+    bins = [min(int(p * PHASE_BINS), PHASE_BINS - 1) for p in phases]
     weights, per_bin = weights_of(bins)
     total = float(len(samples))
     share = {}
@@ -456,15 +585,28 @@ def analyze(elf, samples, meta, timeline):
     print()
     errors = f"，读错跳过 {meta['read_errors']} 次" if meta.get("read_errors") else ""
     print(f"—— CPU 时间拆分（{meta['time']}，采了 {len(samples)} 个样本、{seconds:.1f} s{errors}）——")
-    print(f"每拍 {period} 个 CPU 周期（SysTick 的 LOAD + 1）；CYCCNT 量到每 ms 约 {unwrap(samples)[-1] / meta['ms']:.0f} 个周期。"
-          f"1 ms 分 {PHASE_BINS} 格，每格采到 {min(filled)}~{max(filled)} 个，已按格拉平"
+    if drdy:
+        print(f"一拍 = 一个 DRDY 周期 {period_us:.3f} us（ODR {1e6 / period_us:.3f} Hz），零点 = DRDY（EXTI 中断最早开始的地方）。")
+        late = (f"，其中晚到的 {info['late']} 次（{info['late'] * 100 / info['grid']:.1f} %，中位数晚 "
+                f"{info['late_us']:.0f} us：那几拍整条链跟着往后推，表里的 99 % 分位含着它们）" if info["late"] else "")
+        print(f"DRDY 时刻表读了 {info['grid']} 次：扣掉慢漂以后散布 {info['scatter_us']:.1f} us（RMS），"
+              f"离慢漂太远不用的 {info['outliers']} 次{late}；慢漂前后一共 {info['drift_us']:.1f} us。"
+              f"CYCCNT 对 TIM2 的偏移每次读散布 {info['offset_spread_us']:.0f} us（10 %~90 %，准到 10 ms 以内就够）；"
+              f"按 EXTI 中断的 {info['exti']} 个样本归零，它们在一拍里占 {info['exti_width_us']:.1f} us（1 %~99 %）。")
+    else:
+        print(f"一拍 = SysTick 的 LOAD + 1 = {meta['period']} 个 CPU 周期，零点 = SysTick（{info['reason']}）。")
+    print(f"CYCCNT 量到每 ms 约 {unwrap(samples)[-1] / meta['ms']:.0f} 个周期。"
+          f"一拍分 {PHASE_BINS} 格，每格采到 {min(filled)}~{max(filled)} 个，已按格拉平"
           f"{'' if len(filled) == PHASE_BINS else f'（有 {PHASE_BINS - len(filled)} 格一个都没采到！）'}。")
     err = 1.96 * (0.01 * 0.99 / max(1.0, total)) ** 0.5 * period_us
     print(f"统计误差（95 %）：占比 1 % 的项约 ±{err:.2f} us/拍，占比越大误差越大（50 % 的约 "
           f"±{1.96 * (0.25 / max(1.0, total)) ** 0.5 * period_us:.1f} us/拍）。")
 
-    rates = {LOOP: meta["loops"], ("中断", "EXTI（DRDY 计时）"): meta["drdy"], ("中断", "SysTick"): meta["ms"],
-             ("主循环", "Usb_SendGyro（每 20 ms 发一次）"): meta["ms"] // 20}
+    beats = meta["ms"] * 1000.0 / period_us if drdy else meta["ms"]
+    rates = {LOOP: meta.get("loops", beats), EXTI: meta.get("drdy", beats),
+             ("中断", "SysTick"): meta["ms"], ("主循环", "Usb_SendGyro（每 20 ms 发一次）"): meta["ms"] // 20}
+    if "loops" not in meta:
+        print(f"Robot_Loop、EXTI 的每秒次数按{'每个 DRDY ' if drdy else '每 ms '}一次算（固件里没有计数）。")
     if "dji" in meta:
         rs05 = meta["rs05_online"] * meta["ms"]
         rates[CAN] = rs05 + meta["dji"]
@@ -513,20 +655,66 @@ def analyze(elf, samples, meta, timeline):
         main_group = max(where, key=where.get)
         print(f"  {s * 100:6.2f}%  {s * period_us:6.1f} us/拍  {name}（算在：{main_group}）")
 
+    if drdy:
+        print_latency(groups, phases, weights, period_us)
     if timeline:
-        print_timeline(groups, bins, weights, per_bin, period_us)
+        print_timeline(groups, bins, per_bin, period_us, drdy)
 
 
-def print_timeline(groups, bins, weights, per_bin, period_us):
-    """以 SysTick 中断所在的格为 0，每 10 us 一格，列出这一格里占比最大的几项。"""
+# “DRDY 之后多久轮到”表里的项：名字，哪些组算它
+LATENCY_ITEMS = (
+    ("EXTI（DRDY）中断：启动 DMA", lambda g: g == EXTI),
+    ("SPI1、DMA2 中断：两段 DMA 读完", lambda g: g == SPI),
+    ("Robot_Loop（不含开头的轮询）", lambda g: g[:2] == LOOP),
+    ("  INS_Update：处理样本、姿态解算（每 100 ms 多一次读温度）", lambda g: g[:3] == INS),
+    ("  Gimbal_Update", lambda g: g == LOOP + ("Gimbal_Update",)),
+    ("  Shoot_Update", lambda g: g == LOOP + ("Shoot_Update",)),
+    ("  RS05_Manager_SendAll", lambda g: g == LOOP + ("RS05_Manager_SendAll",)),
+    ("  DJI_MotorManager_SendAll", lambda g: g == LOOP + ("DJI_MotorManager_SendAll",)),
+)
+
+
+def weighted_quantiles(pairs, qs):
+    """pairs 是 (值, 权重)，qs 从小到大。"""
+    pairs = sorted(pairs)
+    total = sum(w for _, w in pairs)
+    out, acc, j = [], 0.0, 0
+    for q in qs:
+        while j < len(pairs) - 1 and acc + pairs[j][1] < q * total:
+            acc += pairs[j][1]
+            j += 1
+        out.append(pairs[j][0])
+    return out
+
+
+def print_latency(groups, phases, weights, period_us):
+    print()
+    print("DRDY 之后多久轮到（us；1 % 分位约等于最早开始，99 % 约等于最晚结束；拉平的权重照算）：")
+    print("    最早    中位    最晚   样本数  项目")
+    for label, match in LATENCY_ITEMS:
+        pairs = [(p * period_us, w) for p, w, g in zip(phases, weights, groups) if match(g)]
+        if len(pairs) < 20:
+            print(f"  {'':22}{len(pairs):7d}  {label}（样本太少，不算）")
+            continue
+        q1, q50, q99 = weighted_quantiles(pairs, (0.01, 0.5, 0.99))
+        print(f"  {q1:6.1f}  {q50:6.1f}  {q99:6.1f}  {len(pairs):7d}  {label}")
+
+
+def print_timeline(groups, bins, per_bin, period_us, drdy):
+    """每 10 us 一格，列出这一格里占比最大的几项。DRDY 零点时 0 就是 DRDY；SysTick 零点时取 SysTick 样本最多的那一格。"""
     cells = [{} for _ in range(PHASE_BINS)]
     for g, b in zip(groups, bins):
         cells[b][g[-1]] = cells[b].get(g[-1], 0) + 1
-    systick = [cells[b].get("SysTick", 0) / per_bin[b] if per_bin[b] else 0.0 for b in range(PHASE_BINS)]
-    origin = max(range(PHASE_BINS), key=lambda b: systick[b]) if max(systick) > 0 else 0
     width = period_us / PHASE_BINS
+    if drdy:
+        origin = 0
+        zero = "DRDY"
+    else:
+        systick = [cells[b].get("SysTick", 0) / per_bin[b] if per_bin[b] else 0.0 for b in range(PHASE_BINS)]
+        origin = max(range(PHASE_BINS), key=lambda b: systick[b]) if max(systick) > 0 else 0
+        zero = f"SysTick 中断所在的那 {width:.0f} us"
     print()
-    print(f"1 ms 里的时间线（0 = SysTick 中断所在的那 {width:.0f} us；每格列出占比最大的几项，空转 > 90 % 的格并在一起）：")
+    print(f"一拍里的时间线（0 = {zero}；每格列出占比最大的几项，空转 > 90 % 的格并在一起）：")
     idle_name = IDLE[-1]
     run_start = None
     for k in range(PHASE_BINS + 1):

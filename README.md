@@ -18,6 +18,7 @@ RoboMaster 步兵机器人 STM32 固件开发工程。当前整车采用 C 板�
 ## 整车接线
 
 - 云台 C 板 CAN1 接两个 RS05，并通过板间 CAN 接底盘 F405 的 CAN2。云台 C 板 CAN2 接比赛发射机构的两台 M3508（ID 1、2）和一台 M2006（ID 3）。
+- RS05 云台使用板载 BMI088 的 INT3 → PC5 数据就绪信号启动 DMA 采样，TIM2 以 1 MHz 计时；每个新样本触发一次控制，超过 1.5 ms 没有新样本时按系统 tick 兜底运行。
 - 底盘 F405 的 CAN1 接四台 C620 + M3508。底盘插座和调试口脚位见 [F405 底盘说明](F405_Project/README.md)，整车供电见 [电源树](docs/整车电源树.svg)。
 - F405 第二版网表中 CAN1 的 2-pin 插座为 1 CANH、2 CANL，与第一版相反。实物接线前须核对，差异见 [第二版板子笔记](F405_Project/notes.md#2026-11-17-第二版板子网表-405板子的网表_v2enet)。
 
@@ -39,7 +40,8 @@ Power 工程也使用 Debug 预设，输出 `Power/build/Debug/Power.elf`，下�
 
 - RS05 云台、F405 底盘、GM6020 云台和 C 板底盘测试工程的 ARM Debug 全量编译通过。复跑了 22 个发射机构主机模型场景，复核了位置反转、掉速退出和连续卡弹锁定。
 - 发射机构新增 [`shoot_watch.py`](Test_Module/Gimbal/Gimbal_test_RS05/tools/shoot_watch.py) 调试脚本，使用说明见 [RS05 云台笔记](Test_Module/Gimbal/Gimbal_test_RS05/notes.md)。本版未烧录，发射机构和调试脚本均未在真板上验证。
-- CAN2 的自动重发与离线恢复已在 `Gimbal_test_RS05.ioc` 中打开。请在 CubeMX 点 **GENERATE CODE** 后重新编译；当前生成的 `can.c` 里两项仍为 `DISABLE`。
+- RS05 云台 CAN2 的自动重发与离线恢复已通过 CubeMX 生成，当前 `can.c` 两项均为 `ENABLE`。以后修改 `.ioc` 后仍须重新生成并编译。
 - 2026-11-19 提交前，六个 ARM 工程均全量编译通过且无编译警告，CarSim、HostTest、HostTest_RS05、Power 九组主机测试通过，九个 Python 脚本语法检查通过。本轮未烧录、未上板验证；Power 笔记中的实板功率计结果仅对应此前版本。
+- 2026-11-21 提交前，五个受共用 BMI088 / DJI 驱动改动影响的 ARM 工程全量编译通过，CarSim、HostTest、Power 九组主机测试及 DRDY 时序模拟通过，改动的 Python 脚本语法检查通过，CPU 分析脚本用合成样本复跑正常。RS05 云台已记录部分实板验收，USB 连续运行及带电机验收仍待完成，详见该工程 notes.md；本次提交操作未烧录或操作硬件。
 
 构建输出、IDE 本地状态和历史备份不纳入版本管理；第三方驱动及硬件资料的权利属于各自权利人。

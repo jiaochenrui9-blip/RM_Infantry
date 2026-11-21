@@ -13,8 +13,8 @@
 #define INS_TEMP_TARGET_C   40.0f
 /* 加热 PI：温度误差 ℃ → 占空比 0~1（1 为满功率 0.58 W），Ki 的单位是 1/(℃·s)。
    占位值（主机模型里不来回摆），按 notes 验收第 2 步测出来的升温曲线算 */
-#define INS_TEMP_PID_KP     0.5f
-#define INS_TEMP_PID_KI     0.05f
+#define INS_TEMP_PID_KP     0.3f
+#define INS_TEMP_PID_KI     0.03f
 /* 上电后最多等多久到温（ms），过了就不管温度直接标定；写 0 就是不等（只插 USB、只接调试器时用）。
    待定：取实测到温时间的 2 倍左右。比到温时间短的话，会在升温途中标定 */
 #define INS_HEAT_TIMEOUT_MS 120000U

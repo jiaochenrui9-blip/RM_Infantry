@@ -62,5 +62,6 @@ uint8_t DJI_Motor_IsOnline(const DJI_Motor_t *motor,
         return 0U;
     }
 
-    return ((now_tick - motor->last_feedback_tick) <= timeout_ms) ? 1U : 0U;
+    /* 反馈可能在调用者取 now_tick 之后才到，时间戳比 now_tick 还大：按有符号算，算作刚收到 */
+    return ((int32_t)(now_tick - motor->last_feedback_tick) <= (int32_t)timeout_ms) ? 1U : 0U;
 }

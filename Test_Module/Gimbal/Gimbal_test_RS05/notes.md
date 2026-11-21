@@ -2,7 +2,7 @@
 
 > 和 `Test_Module/Gimbal/Gimbal_test`（GM6020 版）并列：同一套云台代码，只把两个云台电机换成灵足 RS05（电流模式）。两个工程都保留，用哪个看最后装哪种电机。
 > 云台本身的进度、接口、调试步骤、注意事项都以 `Gimbal_test/notes.md` 为准，这里只记和它不一样的地方。跨模块约定见 `RM_Infantry/notes.md`。
-> 最后更新：2026-11-20 夜里（CPU 时间拆分：写了 `tools/cpu_profile.py`，不改固件、不停核采样 PC；没接电机时干活约 12 %，大头是 BMI088 的 DMA 读取约 30 µs/拍和每拍阻塞读温度约 27 µs；CAN 接收中断还没量。见「CPU 时间拆分」）。2026-11-20 晚上（第 0 步上板量过：陀螺仪 ODR 999.68 Hz（慢 0.032 %，随温度约 −23 ppm/℃）；Robot_Loop 的重复 / 跳过只在相位交界处成串出现，每转一圈净 1 次、其余成对，原来写的“n0、n2 合计每秒 ≈ |ODR − 1000|”是错的，差才是；Robot_Loop 102 µs、INS_Update 44 µs（-O0）。见「第 0 步上板实测」）。2026-11-20（INS 和云台的时序：先分析、定方案，然后第 0 步的代码写好、编译过，还没烧。见「INS 和云台的时序」「第 0 步」两节）。2026-11-12 晚上（第一次小陀螺，用户自己跑的，Claude 事后从 OpenOCD 日志里解出记录来看：云台对地一直在 ±0.8° 左右晃；第 6 圈 yaw 被硬挡住、云台被底盘带着转，用户断电；原因要看车，还没看；没改代码。见「当前状态」第一条、「第一次小陀螺」）。2026-11-12 收工（板子状态、下一步、没提交的东西见「当前状态」里“收工时”那条）。2026-11-12 电机定死（写了 `tools/csp_hold.py`：暂停 C 板、直接写 CAN 邮箱发 RS05 CSP 位置帧把两个电机定住 60 s；pitch 电机 ±0.03° 没动；yaw 一碰就狂抖（RS05 出厂的 CSP 增益带不了这个负载，推断）；没给用户实时的开始信号，用户指出了。第二次只定 pitch、用户自己跑：电机轴 ±0.03° 不动、不抖，炮管的晃动全在结构上。见「电机定死看结构晃不晃」）。2026-11-12 烧录后复查（重力前馈 0.40 生效、积分负担从 0.33 A 降到摩擦带里；pitch 模式 2 抬得快了、往下放冲得多，整体没变好，瓶颈是四连杆间隙和摩擦；yaw 和烧之前一样。见「车上调 pitch、量重力」的「烧录后复查」）。2026-11-12 收尾（用户定 pitch 用 0.005 / 0.05 / 4，和重力前馈 0.40 一起写进 config；ARM 0 警告；HostTest_RS05 模型 pitch 重力改成实测值后 0 失败；还没烧）。2026-11-12 最后（yaw 0.013 / 0.12 / 8 写进 config；车上从小调 pitch：模式 1 下 0.02 / 0.2 / 12 好，模式 2 被四连杆间隙限在 ≤ 0.005 / 0.05 / 4；写了 `tools/pitch_gravity.py`，重力拟合 0.40 A，−8° 附近有个台阶；pitch 参数和重力前馈都还没写进 config；yaw 超调的分析和办法。见「车上调 pitch、量重力」）。2026-11-12 再后来（车上实时调 yaw：写了 `tools/pid_step.py`，模式 2 下试了 7 组。速度环落在 0.013 / 0.12，和用户自己调的一样（用户的是 0.013 / 0.12 / 12，开头板子上的 Ki 0.05 是 yaw、pitch 写混了）；角度环 8 超调小、12 起步快。运行中改的、没写进 config；结论是现在的结构下 PID 到头了，见「车上调 yaw」）。2026-11-12 后来（pitch 机械改了结构，按用户量的数改了 pitch 中值 −1.5010 → −1.1781（−67.5°）、软限位 −15 / 20 → −31 / 28；ARM 0 警告；HostTest_RS05 两个 yaw 场景不过，是 11-11 那组 yaw 增益软，和这次无关；还没烧。见「当前状态」第一条）。2026-11-12（用户调好一组 PID，两个轴 2 / 0.013 / 0.05；快到目标时卡一下再微调，问是不是摩擦前馈管的：多半是静摩擦加增益低，现在按实测转速算的摩擦前馈补不了粘住那一下；没改代码，见「上板记录」最后一条）。2026-11-11 后来（「上车」加了方向的标准和上车的成功标准，按第一版机械写：yaw 编码器读的是电机角，pitch 连杆只用单调的一段；pitch 方向用户确认是 1，yaw、pitch 的方向注释改准了，值都没动）。2026-11-11（用户接线改成 C 板 CAN1，代码改回 CAN1、和已提交的一样；ARM 0 警告，主机测试 0 失败；`%TEMP%` 里的脚本测试被系统清理删了，没重跑。见「CAN1 / CAN2 来回」）。2026-11-10 晚上（RS05 这一路从 CAN1 改到 CAN2：.ioc、robot.c、gimbal_watch.py、主机测试模型都改了。ARM 0 警告，主机测试 0 失败，脚本测试 182 项全过；没上板。见「改到 CAN2」）。2026-11-10 机械第一版出车（pitch 连杆有极位、yaw 齿轮传动比未知、C 板装在炮管上，影响「上车」第 2、3、4、8 步，见「上车」开头；没改代码）。2026-11-10 上车准备（用户让改回两个电机都在线、配置成能上车：在线判断改回 yaw、pitch 都要在线，删了模式 3，gimbal_watch.py 加了 pitch。ARM 0 警告，主机测试两版都 0 失败；还没上车。见「上车」）。2026-11-10 最后（用户定第一版摩擦前馈保持 0、先不测；「当前状态」按上板以后的情况改了，原来那条“还没上板、PID 都是占位值”过时了）。2026-11-10 再后来（用户问上车以后摩擦会不会变：会，多半变大。台子上测的只用来跑通流程、验符号、当安全的下限，车上照「上车重测」再测；没改代码）。2026-11-10 后来（加了 yaw 摩擦前馈：`Gimbal_Update` 里一个式子 + gimbal_config.h 三个宏，系数先给 0 = 关；写了测摩擦脚本 `tools/yaw_friction.py`。ARM 0 警告，HostTest_RS05 0 失败，脚本在假板子上 103 项全过，前馈在加了库仑摩擦的主机模型里验过符号和效果；都还没上板。见「yaw 摩擦前馈」）。2026-11-10（讨论了 yaw 前馈：底盘转时云台被带走，建议用 RS05 自己的相对转速做摩擦前馈、不用底盘陀螺仪。用户还没定，没写代码。同日后来补了粘住 / 脱开两段、参数怎么测，带宽改成 10°/s 左右。见「yaw 摩擦前馈」）。2026-11-09（单电机 + 拿在手里的 C 板：yaw 方向改成 −1；在线判断暂时只看 yaw；test_cmd 加了测试模式 3，yaw 跟着 C 板转。主机上验过，还没上板。见「单电机：yaw 跟着 C 板转」）。2026-11-08 建工程
+> 最后更新：2026-11-21（第 1 步代码写好：DRDY 当节拍、INS 的 dt 用样本时刻、温度 100 ms 读一次、读温度占住 SPI；兜底门限主机模拟后从 2 ms 改成 1.5 ms；顺带 `DJI_Motor_IsOnline` 改成有符号比。5 个 ARM 工程 0 警告，HostTest、CarSim 过，主机时序模拟过。同日上板查了验收 1~3：ODR 999.662 Hz，屏蔽 EXTI5 兜底、放开恢复都对，INS 标定、valid 1；USB、电机两条还没做。`cpu_profile.py` 改成以 DRDY 为零点，量出 DRDY 之后约 50 µs Robot_Loop 开始、约 73~83 µs 云台用上（-O0）；顺带发现约 18 % 的 DRDY 晚到约 46 µs，原因没查清。见「第 1 步：DRDY 当节拍」「第 1 步上板」「cpu_profile.py 改成以 DRDY 为零点」）。2026-11-20 深夜（第 0 步原样提交并推送 `d92bde5`，之后删了 robot.c 里的测量代码，只留启动 TIM2；第 1 步要改的四处定了，代码还没写。见「第 0 步提交，删测量代码」「第 1 步要改什么」）。2026-11-20 夜里（CPU 时间拆分：写了 `tools/cpu_profile.py`，不改固件、不停核采样 PC；没接电机时干活约 12 %，大头是 BMI088 的 DMA 读取约 30 µs/拍和每拍阻塞读温度约 27 µs；CAN 接收中断还没量。见「CPU 时间拆分」）。2026-11-20 晚上（第 0 步上板量过：陀螺仪 ODR 999.68 Hz（慢 0.032 %，随温度约 −23 ppm/℃）；Robot_Loop 的重复 / 跳过只在相位交界处成串出现，每转一圈净 1 次、其余成对，原来写的“n0、n2 合计每秒 ≈ |ODR − 1000|”是错的，差才是；Robot_Loop 102 µs、INS_Update 44 µs（-O0）。见「第 0 步上板实测」）。2026-11-20（INS 和云台的时序：先分析、定方案，然后第 0 步的代码写好、编译过，还没烧。见「INS 和云台的时序」「第 0 步」两节）。2026-11-12 晚上（第一次小陀螺，用户自己跑的，Claude 事后从 OpenOCD 日志里解出记录来看：云台对地一直在 ±0.8° 左右晃；第 6 圈 yaw 被硬挡住、云台被底盘带着转，用户断电；原因要看车，还没看；没改代码。见「当前状态」第一条、「第一次小陀螺」）。2026-11-12 收工（板子状态、下一步、没提交的东西见「当前状态」里“收工时”那条）。2026-11-12 电机定死（写了 `tools/csp_hold.py`：暂停 C 板、直接写 CAN 邮箱发 RS05 CSP 位置帧把两个电机定住 60 s；pitch 电机 ±0.03° 没动；yaw 一碰就狂抖（RS05 出厂的 CSP 增益带不了这个负载，推断）；没给用户实时的开始信号，用户指出了。第二次只定 pitch、用户自己跑：电机轴 ±0.03° 不动、不抖，炮管的晃动全在结构上。见「电机定死看结构晃不晃」）。2026-11-12 烧录后复查（重力前馈 0.40 生效、积分负担从 0.33 A 降到摩擦带里；pitch 模式 2 抬得快了、往下放冲得多，整体没变好，瓶颈是四连杆间隙和摩擦；yaw 和烧之前一样。见「车上调 pitch、量重力」的「烧录后复查」）。2026-11-12 收尾（用户定 pitch 用 0.005 / 0.05 / 4，和重力前馈 0.40 一起写进 config；ARM 0 警告；HostTest_RS05 模型 pitch 重力改成实测值后 0 失败；还没烧）。2026-11-12 最后（yaw 0.013 / 0.12 / 8 写进 config；车上从小调 pitch：模式 1 下 0.02 / 0.2 / 12 好，模式 2 被四连杆间隙限在 ≤ 0.005 / 0.05 / 4；写了 `tools/pitch_gravity.py`，重力拟合 0.40 A，−8° 附近有个台阶；pitch 参数和重力前馈都还没写进 config；yaw 超调的分析和办法。见「车上调 pitch、量重力」）。2026-11-12 再后来（车上实时调 yaw：写了 `tools/pid_step.py`，模式 2 下试了 7 组。速度环落在 0.013 / 0.12，和用户自己调的一样（用户的是 0.013 / 0.12 / 12，开头板子上的 Ki 0.05 是 yaw、pitch 写混了）；角度环 8 超调小、12 起步快。运行中改的、没写进 config；结论是现在的结构下 PID 到头了，见「车上调 yaw」）。2026-11-12 后来（pitch 机械改了结构，按用户量的数改了 pitch 中值 −1.5010 → −1.1781（−67.5°）、软限位 −15 / 20 → −31 / 28；ARM 0 警告；HostTest_RS05 两个 yaw 场景不过，是 11-11 那组 yaw 增益软，和这次无关；还没烧。见「当前状态」第一条）。2026-11-12（用户调好一组 PID，两个轴 2 / 0.013 / 0.05；快到目标时卡一下再微调，问是不是摩擦前馈管的：多半是静摩擦加增益低，现在按实测转速算的摩擦前馈补不了粘住那一下；没改代码，见「上板记录」最后一条）。2026-11-11 后来（「上车」加了方向的标准和上车的成功标准，按第一版机械写：yaw 编码器读的是电机角，pitch 连杆只用单调的一段；pitch 方向用户确认是 1，yaw、pitch 的方向注释改准了，值都没动）。2026-11-11（用户接线改成 C 板 CAN1，代码改回 CAN1、和已提交的一样；ARM 0 警告，主机测试 0 失败；`%TEMP%` 里的脚本测试被系统清理删了，没重跑。见「CAN1 / CAN2 来回」）。2026-11-10 晚上（RS05 这一路从 CAN1 改到 CAN2：.ioc、robot.c、gimbal_watch.py、主机测试模型都改了。ARM 0 警告，主机测试 0 失败，脚本测试 182 项全过；没上板。见「改到 CAN2」）。2026-11-10 机械第一版出车（pitch 连杆有极位、yaw 齿轮传动比未知、C 板装在炮管上，影响「上车」第 2、3、4、8 步，见「上车」开头；没改代码）。2026-11-10 上车准备（用户让改回两个电机都在线、配置成能上车：在线判断改回 yaw、pitch 都要在线，删了模式 3，gimbal_watch.py 加了 pitch。ARM 0 警告，主机测试两版都 0 失败；还没上车。见「上车」）。2026-11-10 最后（用户定第一版摩擦前馈保持 0、先不测；「当前状态」按上板以后的情况改了，原来那条“还没上板、PID 都是占位值”过时了）。2026-11-10 再后来（用户问上车以后摩擦会不会变：会，多半变大。台子上测的只用来跑通流程、验符号、当安全的下限，车上照「上车重测」再测；没改代码）。2026-11-10 后来（加了 yaw 摩擦前馈：`Gimbal_Update` 里一个式子 + gimbal_config.h 三个宏，系数先给 0 = 关；写了测摩擦脚本 `tools/yaw_friction.py`。ARM 0 警告，HostTest_RS05 0 失败，脚本在假板子上 103 项全过，前馈在加了库仑摩擦的主机模型里验过符号和效果；都还没上板。见「yaw 摩擦前馈」）。2026-11-10（讨论了 yaw 前馈：底盘转时云台被带走，建议用 RS05 自己的相对转速做摩擦前馈、不用底盘陀螺仪。用户还没定，没写代码。同日后来补了粘住 / 脱开两段、参数怎么测，带宽改成 10°/s 左右。见「yaw 摩擦前馈」）。2026-11-09（单电机 + 拿在手里的 C 板：yaw 方向改成 −1；在线判断暂时只看 yaw；test_cmd 加了测试模式 3，yaw 跟着 C 板转。主机上验过，还没上板。见「单电机：yaw 跟着 C 板转」）。2026-11-08 建工程
 
 ## 2026-11-14 USB CDC 发送验证
 
@@ -192,11 +192,12 @@
 | `App/gimbal/gimbal.h` | include `rs05.h`；`Gimbal_Init` 的两个参数是 `RS05_Manager_t *`。Cmd / Feedback / 模式都一样 |
 | `App/gimbal/gimbal.c` | 只改了电机这一层：<br>`GimbalAxis_t` 里是 `RS05_Motor_t motor`、`int8_t direction`、`float zero_rad`（RS05 驱动不管方向，方向在这里乘）。<br>`Gimbal_AxisRead`：`angle_deg = direction × Math_WrapDeg180((position_rad − zero_rad) × 57.2958)`，`rate_dps = direction × velocity_rad_s × 57.2958`，每周期直接读驱动里的最新值。<br>`Gimbal_AxisOutput`：`RS05_SetCurrent(&motor, 不是 RELAX, direction × 限幅后的电流)`。<br>在线判断用 `RS05_IsOnline`（100 ms 内有反馈，并且没有故障位），yaw、pitch 都在线才算（2026-11-09 单电机测试时临时只看 yaw，11-10 改回）。<br>`Gimbal_AxisControl`、`Gimbal_UpdateMode`、IMU 模式、重力前馈一行没改。<br>2026-11-10 加了 yaw 摩擦前馈（`Gimbal_Update` 里和 pitch 重力前馈放在一起；Gimbal_test 没有），见「yaw 摩擦前馈」 |
 | `App/gimbal/gimbal_config.h` | `*_CAN_ID`（1、2，上位机里设）代替 `*_ESC_ID`；`*_ZERO_RAD`（rad）代替 `*_ECD_OFFSET`；电流限幅 1.0 A（约 0.67 N·m，和 GM6020 版的 5000 差不多）；速度环 Kp 0.004（GM6020 版 20 × 3/16384 × 0.741 / 0.67）；重力前馈单位是 A。`GIMBAL_YAW_DIRECTION` 2026-11-09 改成 −1（GM6020 版还是占位的 1）。2026-11-10 加了 `GIMBAL_YAW_FRICTION_FF`、`GIMBAL_YAW_VISCOUS_FF`（先给 0）和 `GIMBAL_YAW_FRICTION_BAND_DPS`（10°/s），Gimbal_test 没有 |
-| `App/robot.c` | 一个 `RS05_Manager_t`（CAN1，yaw、pitch 都在上面）。顺序：`RS05_Manager_Init` → `Gimbal_Init` → `INS_Init` → `RS05_Manager_Start`。每周期 `RS05_Manager_SendAll` 后再发 0x110；接收回调把 CAN1 的帧交给 `RS05_Manager_ProcessRxFrame`。CAN2 不用、不启动。<br>2026-11-20 加了时序测量（TIM2 启动、PC5 的 EXTI 回调、Robot_Loop 里的计数和计时），Gimbal_test 没有。见「第 0 步」 |
+| `App/robot.c` | 一个 `RS05_Manager_t`（CAN1，yaw、pitch 都在上面）。顺序：`RS05_Manager_Init` → `Gimbal_Init` → `INS_Init` → `RS05_Manager_Start`。每周期 `RS05_Manager_SendAll` 后再发 0x110；接收回调把 CAN1 的帧交给 `RS05_Manager_ProcessRxFrame`。CAN2 不用、不启动。<br>2026-11-20 第 0 步加过时序测量（PC5 的 EXTI 回调、Robot_Loop 里的计数和计时），原样在提交 `d92bde5` 里，之后删了。<br>2026-11-21 第 1 步：`Robot_Loop` 有新 IMU 样本就跑，离上个样本超过 1500 µs 才按 tick 跑；`HAL_GPIO_EXTI_Callback`（PC5）调 `INS_GyroDrdy(TIM2 计数)`；TIM2 在 `Robot_Init` 最先启动。`robot.h` 只改了注释。Gimbal_test 还是按 tick 每 1 ms 跑。见「第 1 步：DRDY 当节拍」 |
+| `App/ins/ins.c`、`ins.h` | 2026-11-21 第 1 步：DRDY 中断里 `INS_GyroDrdy` 启动采样、记样本时刻；`INS_Update` 每个样本处理一次，dt 用相邻两个样本的时刻；温度按 tick 每 100 ms 读一次；多了 `INS_IsSampleReady`、`INS_GetSampleUs` 给 robot.c。Gimbal_test 还是每 1 ms 读一次最新样本、dt 写死 0.001 s、每 1 ms 读温度 |
 | `CMakeLists.txt` | 工程名 `Gimbal_test_RS05`；不编 DJI_Driver（6 个 .c 和 include 目录），编 `Shared/Devices/RS05/rs05.c` |
 | `Gimbal_test_RS05.ioc` | 工程名；CAN1 打开自动重发（`CAN1.NART=ENABLE`，`NART` 加进 `CAN1.IPParameters`）。生成的代码只有 `can.c` 里 `hcan1.Init.AutoRetransmission = ENABLE` 这一行不同。<br>2026-11-10 又打开了 CAN1 的自动离线恢复（`CAN1.ABOM=ENABLE`，`ABOM` 加进 `CAN1.IPParameters`）。原因：当天 C 板的 24 V 断过，CAN1 进了 BUS-OFF，没开 ABOM 时要复位 C 板才能恢复。CubeMX 6.15 命令行重新生成后，生成的代码只多了 `can.c` 的 `hcan1.Init.AutoBusOff = ENABLE` 一行，Drivers 的 1442 个文件 md5 都没变；ARM 0 警告，FLASH 38624 B / RAM 3144 B。日志里 5 条 ERROR 都是 CubeMX 用户目录里第三方包（PDSC）的版本不支持，和工程无关。<br>2026-11-20：PC5 改成 EXTI5（上升沿、下拉、优先级 5），加了 TIM2（1 MHz 时间戳），给第 0 步的 DRDY 计时用，Gimbal_test 没改。见「第 0 步」 |
 
-一样的：`App/ins`、`App/robot.h`、`Core/` 其余文件、`Drivers/`（只差换行符）、链接脚本、启动文件、`App/test_cmd`（2026-11-09 多过一个测试用的模式 3，11-10 删了，又和 Gimbal_test 逐字节一样）。
+一样的：`Core/` 其余文件、`Drivers/`（只差换行符）、链接脚本、启动文件、`App/test_cmd/gimbal_test_cmd.*`（2026-11-09 多过一个测试用的模式 3，11-10 删了，又和 Gimbal_test 逐字节一样）。2026-11-21 起 `App/ins/ins.c/.h`、`App/robot.h` 也不一样了（第 1 步）。只有这边有的：`App/USB`（11-14）、`App/shoot`、`App/test_cmd/shoot_test_cmd.*`（11-15）。工作区里 `ins_config.h` 的加热 PI 是 0.3 / 0.03（Gimbal_test 和已提交的是 0.5 / 0.05），没提交。
 
 ### 两个工程怎么保持一致
 
@@ -204,7 +205,7 @@ Gimbal_test 以后改 ins、test_cmd、robot.c、.ioc（比如 DR16、USB 虚拟
 
 ```bash
 cd C:/Project/RM_Infantry/Test_Module/Gimbal
-diff -r --strip-trailing-cr Gimbal_test/App Gimbal_test_RS05/App   # 应该只有 gimbal/ 三个文件和 robot.c
+diff -r --strip-trailing-cr Gimbal_test/App Gimbal_test_RS05/App   # 应该只有 gimbal/ 三个文件、ins.c、ins.h、robot.c、robot.h，加上只有这边有的 USB/、shoot/、shoot_test_cmd.*
 diff --strip-trailing-cr Gimbal_test/Gimbal_test.ioc Gimbal_test_RS05/Gimbal_test_RS05.ioc   # 应该只有 NART、ABOM（2026-11-10 起）、PC5 的 EXTI 和 TIM2（2026-11-20 起）和工程名
 ```
 
@@ -959,3 +960,147 @@ python C:/Project/RM_Infantry/Test_Module/Gimbal/Gimbal_test_RS05/tools/yaw_fric
   - SPI1 不能再快：84 MHz / 8 = 10.5 MHz，超过了 BMI088 的 10 MHz。
   - 都还没改。
 - 还没量：CAN 接收中断（2 个 RS05 加 3 个大疆，每秒约 5000 帧）。接上电机再跑一次 `cpu_profile.py`：大疆的帧数按 `feedback_count` 数，RS05 按在线个数估，表里会给出每帧多少 µs。
+
+## 2026-11-20 第 0 步提交，删测量代码
+
+- 第 0 步原样提交并推送：`d92bde5`（.ioc 的 PC5 EXTI 和 TIM2、生成的代码、BMI088 驱动打开 DRDY、robot.c 的测量代码、`timing_watch.py`、`cpu_profile.py`、两份 notes）。没放进去：`App/ins/ins_config.h` 的加热 PI（Kp 0.5 → 0.3、Ki 0.05 → 0.03）、根目录的 `AGENTS.txt`、`tools.zip`。
+- 然后删了 robot.c 里的测量代码：12 个 `robot_*` 变量、`Robot_NowUs`、Robot_Loop 里的计数和计时、EXTI 回调。只留 `Robot_Init` 开头启动 TIM2，robot.c 和第 0 步之前（`20e948b`）只差这几行。EXTI 中断还开着：每个 DRDY 进一次中断，回调是 HAL 自带的空函数。
+- 为什么删：
+  - 绕不开的只有 DRDY 的时刻。它每 1 ms 一次，只有中断知道；OpenOCD 每秒只能在随机时刻读约 580 次，跟不上每一次。
+  - ODR 用"个数、时刻"隔几秒读两次就能算；耗时 `cpu_profile.py` 不改固件已经量了；重复/跳过、样本年龄只是为了看清按 tick 跑的毛病，第 1 步以后没有这个毛病。
+- 以后怎么量：
+  - 耗时、DRDY 之后多久轮到哪段：`cpu_profile.py`。第 1 步以后把时间线的零点从 SysTick 改成 DRDY（读 INS 记的样本时刻）。
+  - ODR、有没有退回按 tick 跑：读第 1 步控制代码自己的量（INS 记的样本时刻、Robot_Loop 上次跑的时刻），再读 TIM2 计数和 uwTick。
+  - 只有固件记得下来的（精确的次数、最坏的一次）：要用时临时加两三行，量完删。原来那段用 `git show d92bde5:Test_Module/Gimbal/Gimbal_test_RS05/App/robot.c` 看。
+- 脚本：
+  - `cpu_profile.py` 不再要求那两个计数。没有时，Robot_Loop、EXTI 的每秒次数按每 ms 一次算（DRDY 实际 999.7 次/s，差 0.03 %）；EXTI 那项改名"EXTI（DRDY）"。用 120 s 的旧样本重算过，有计数、没计数两种算出来一样（EXTI 每次 1.32 µs，Robot_Loop 每次 80.9 µs）。
+  - `timing_watch.py` 只配 `d92bde5` 那份固件，开头写明了；缺变量时提示去那次提交找。
+- 编译：ARM Debug 清理重编 0 警告，text 67424 / data 372 / bss 10940（第 0 步是 67756 / 376 / 10992）。还没烧。
+
+## 2026-11-20 第 1 步要改什么（定了；11-21 照着写了，兜底门限改成 1.5 ms，见下一节）
+
+- 目标：陀螺仪 DRDY 当整个控制的节拍，一个样本 → 一次 INS → 一次云台 → 一次发 CAN。
+  - DRDY 到云台用上估计不到 0.1 ms（-O0），而且不再漂（现在 1~2 ms，跟着相位漂）。
+  - Robot_Loop 跟陀螺仪的时钟跑（999.68 Hz）。云台、发射的 PID 照样用 0.001 s，差 0.03 % 没影响。
+  - 读温度不再单独改，它是这一步的前提：EXTI 一启动 DMA，每拍阻塞读温度就会和它抢 SPI。
+- 四处，按这个顺序写：
+  1. 驱动 `BMI088_ReadTemperature` 读的时候占住 SPI：关中断，看到 IDLE 才置成新状态（如 `BMI088_STATE_READING_TEMP`），开中断，阻塞读，每条 return 路径都放回 IDLE。
+     - 不占的话，DRDY 落在阻塞读的 27 µs 里时，中断里的 `BMI088_StartSample` 会在温度读到一半时拉片选、启动 DMA，温度或这个样本的加速度读成乱数。
+     - `BMI088_StartSample` 不用改：状态不是 IDLE 它就返回忙，不碰片选。运行中只有读温度这一个阻塞读。
+     - 第 4 处改完以后，正常时温度在样本处理完之后读，离下一个 DRDY 还有 900 多 µs；兜底按 tick 跑的那几拍还可能撞上，所以不能省。
+  2. `ins.c` 温度改成每 100 ms 读一次。
+     - 按 tick 计，不按样本数：样本停了也要读，读失败关加热；按样本数计的话，样本一停加热器就停在最后的占空比上。
+     - 放在处理完样本之后。加热 PID 的 dt 改成 0.1 s；PID 按 dt 做梯形积分，Ki 单位 1/(℃·s)，Kp、Ki 不用换算。
+  3. EXTI 启动采样，INS 每个样本处理一次，dt 用时间戳。
+     - EXTI 回调调 INS 的新函数（如 `INS_GyroDrdy(now_us)`）：`BMI088_StartSample()` 返回 OK 才把 now_us 记成这个样本的时刻（volatile）。上一个样本没处理完时 StartSample 会拒绝，那时也记就和样本对不上了。
+     - 删掉 `INS_Update` 末尾的 `BMI088_StartSample()`：启动采样只在中断里，主循环和中断都调的话"看状态、改状态"没有互斥。
+     - 有新样本时 dt = 这个样本的时刻 − 上一个样本的时刻（`uint32_t` 相减，TIM2 回绕不用管）。先取时刻，再调 `BMI088_ProcessSample`（它最后清 ready，清完下一个 DRDY 就可能改时刻）。间隔超过 10 ms 的那一下不积分。
+     - 中断延迟让单个 dt 抖几 µs（偶尔晚 46.5 µs），前一个长、后一个短，加起来还是对的，积出来的角度不因此漂。
+     - 再加一个函数给 robot.c 问有没有新样本（里面就是 `BMI088_IsSampleReady`）。
+  4. `Robot_Loop` 开头：有新样本就跑；离上个样本超过 2000 µs、且这个 tick 还没跑过，按 tick 兜底跑。
+     - 兜底管 BMI088 初始化失败、DMA 卡住、DRDY 不来：编码器模式照样 1 kHz，`INS_Update` 照样调（valid 才会变 0，温度才接着读）。
+     - 超时用 TIM2 的 µs 判。用 tick 容易写成 `now − 上个样本的 tick >= 2`：样本间隔 1000.32 µs，两个样本之间 tick 会走 2，样本到之前零点几 µs 就误判、多跑一拍。
+     - 传给模块的 `now` 还是 tick。Gimbal、Shoot、MotorControl、test_cmd 只拿它做超时、计时、方波，没有拿两拍的 tick 差做除数，tick 差 0 或 2 都没事。
+- 不在这一步：发给底盘的 `gimbal_yaw_rel_deg` 晚一拍（`Gimbal_GetFeedback` 在 `Gimbal_Update` 前面），第 2 步单独改；DMA 读法的 HAL 开销，看第 1 步量出来的延迟再定。
+- 验收（不接电机能做的）：
+  1. ODR、DRDY → Robot_Loop 的延迟：读控制代码自己的时间戳；有没有丢样本只能抽查。
+  2. 兜底：OpenOCD 临时屏蔽 EXTI5 几秒（不改固件），2 ms 内退回每秒 1000 次、valid 变 0；放开后回到跟 DRDY 跑、valid 回 1。
+  3. INS 照常标定、valid = 1，静止时 yaw 漂移和以前差不多（没接 24 V 时上电 2 min 后才标定）。
+  4. 插 USB、开 VOFA 跑 10 min，采样不停（11-14 出过问题的场景）。
+  5. 接上电机后，编码器模式、IMU 模式和以前一样。
+- 四处控制代码自己写。验收脚本、`cpu_profile.py` 改成以 DRDY 为零点、Gimbal_test 和 F405_Project 重编（驱动在 Shared）是工具活，另做。
+
+## 2026-11-21 第 1 步：DRDY 当节拍（代码写好，ARM 编译、主机模拟过，还没烧）
+
+- 照上一节的四处写，另外多了两处（第 5、6 条）：
+  1. 驱动 `BMI088_ReadTemperature`：关中断，看到 IDLE 才把状态置成新加的 `BMI088_STATE_READING_TEMP`，开中断再阻塞读，读完（成没成都一样）放回 IDLE。`BMI088_StartSample` 没改。
+  2. `ins.c`：温度按 tick 每 `INS_TEMP_PERIOD_MS`（100 ms）读一次，放在处理样本之后；加热 PID 的 dt 是 `INS_TEMP_PERIOD_MS × 0.001`。删了 `INS_DT_S`。
+  3. `ins.c/.h`：
+     - 新函数 `INS_GyroDrdy(now_us)`（EXTI 回调里调，`BMI088_StartSample` 返回 OK 才把时刻记进 `ins_drdy_us`）、`INS_IsSampleReady`、`INS_GetSampleUs`（最后处理的那个样本的时刻 `ins_sample_us`）。
+     - `INS_Update` 末尾的 `BMI088_StartSample()` 删了，启动采样只在中断里。
+     - dt = 这个样本的时刻 − 上一个样本的时刻；先取时刻再调 `BMI088_ProcessSample`。间隔超过 `INS_SAMPLE_TIMEOUT_MS`（10 ms）的那一下不积分。
+     - `ins_last_tick` 留着：valid 的 10 ms 超时用它（`INS_Update` 只拿到 tick），`gimbal_watch.py` 也读它。
+  4. `robot.c`：
+     - `Robot_Loop` 开头：有新样本就跑；没有时，要这个 tick 还没跑过、而且离上个样本（`INS_GetSampleUs`）超过 `ROBOT_SAMPLE_TIMEOUT_US` 才跑。
+     - 加了 `HAL_GPIO_EXTI_Callback`（PC5 → `INS_GyroDrdy(TIM2 计数)`）和 `Robot_NowUs`。
+     - 传给模块的还是 tick。
+  5. 兜底门限从定的 2000 µs 改成 1500 µs（主机模拟里发现的问题）：
+     - 丢一个样本时，两个样本隔约 2000.6 µs，2000 µs 的门限正好卡在下一个样本 DMA 读的那十几 µs 里。主循环看到超时就按 tick 跑一次，这时 SPI 正忙，要是轮到读温度就失败（加热关 100 ms）；十几 µs 后样本读完，又跑一次。
+     - 1.5 个间隔离正常间隔（最长约 1.06 ms）和丢一个样本的间隔（约 2 ms）都远。丢一个样本时在 1.5 ms 处补跑一次；DRDY 停了，1.5 ms 后就按 tick 跑。
+  6. `Shared/Devices/DJI_Driver/dji_motor.c` 的 `DJI_Motor_IsOnline` 改成按有符号比，和 `RS05_IsOnline` 一样：
+     - 原因：跟 DRDY 跑以后，Robot_Loop 开头取的 tick 不再紧跟在 SysTick 后面，一次运行当中 tick 可能走一格。CAN 接收中断（优先级 0）给大疆反馈打的时间戳就会比传进来的 now 大 1，无符号相减变成 0xFFFFFFFF，判成离线：发射的三个电机偶尔掉一拍（`Shoot_UpdateMode` 切模式，`MotorControl_Update` 不出力）。
+     - 按 tick 跑时不会：Robot_Loop 总在 tick 刚变时开始，约 120 µs 就跑完了。
+- 没改、要知道的：
+  - DMA 启动失败或 SPI 出错以后，驱动停在 ERROR，要等下一个 DRDY 进 `BMI088_StartSample` 才复位。这段时间（≤ 1 ms）里读温度返回忙，这 100 ms 就不加热。改之前也一样，不过那时每 1 ms 读一次温度，只关 1 ms。DMA 出错少，没处理。
+  - `BMI088_ReadID`、`BMI088_CalibrateGyro` 也是阻塞读，没占 SPI，只在初始化时用（`initialized` 置 1 之前 StartSample 一律拒绝）；运行中别调。
+  - TIM2 是 32 位，约 71.6 min 回绕一次；按 uint32_t 相减，dt 和超时都不受影响。只有一种情况例外：BMI088 一直没样本（初始化失败等），每过 71.6 min 会有 1.5 ms 被判成“没超时”，少跑一两次，不用管。
+- 编译：
+  - 本工程 ARM Debug 清理重编 0 警告，text 67696 / data 372 / bss 10956（第 0 步删完测量代码是 67424 / 372 / 10940）。
+  - 共享驱动改了，Gimbal_test（text 40400）、F405_Project（63564）、Chassis_test（20764）、Power（20280）也清理重编，都 0 警告；RS05_test 两个驱动都不编。
+  - HostTest 15 过 1 跳过，CarSim 14 个全过（都编 dji_motor.c）。HostTest_RS05 不编这两个驱动，也不编 robot.c、ins.c，没跑。
+- 主机模拟（`%TEMP%\ins_drdy_sim`，临时的，不进仓库，会被系统清理）：
+  - 做法：编真的 BMI088.c、ins.c、robot.c，SPI、定时器、中断、BMI088 芯片是假的。DRDY 999.68 Hz；中断延迟 1~4 µs，每 500 个里有一个再晚 46.5 µs；TIM2 在中途回绕。
+  - 跟 DRDY 跑：每次运行正好一个新样本，没重复、没漏。上升沿到 INS 处理完约 30 µs，中断晚的那次约 78 µs（模拟里的耗时是估的，-O0 上板会长一些）。两次之间 tick 差绝大多数是 1，相位交界处有几次 0 和 2。
+  - yaw 按 100°/s 积 5.4 s，和按样本时刻算的差 < 0.001°；写死 1 ms 的话会少 0.47°（0.032 %）。
+  - 停 DRDY 1 s：1.49 ms 后开始按 tick 跑，0.8 s 里正好 800 次；valid 11 ms 后变 0。恢复：第一个样本 30 µs 内就跑上了，隔了 1 s 的那个样本没积分，之后不再按 tick 多跑。
+  - 丢一个样本：1.47 ms 处按 tick 补跑一次；连丢两个：每个 tick 补一次，样本回来就跟回去。
+  - 温度 99.0~100.3 ms 读一次，停 DRDY 时照读；失败只出在注入 DMA 失败、驱动是 ERROR 的那一下（“没改”第一条）。
+  - 读温度时强行进 DRDY 中断（8 个插入点）：StartSample 都拒绝了，片选没动，温度读对。对照：中断那一刻把状态强行改成 IDLE（旧驱动的样子），查得到片选冲突，有一次温度读成了 22.875 ℃。
+- 上板验收还没做（照上一节「验收」那 5 条）。要用的工具：
+  - `cpu_profile.py` 要改：它把 Robot_Loop 开头到第一个 `return;` 的几行算空转，现在轮询时还会调 `INS_IsSampleReady`（→ `BMI088_IsSampleReady`）、`Robot_NowUs`、`INS_GetSampleUs`，按调用关系会被算进 Robot_Loop 干活，空转就少算了。时间线零点也还是 SysTick，要改成 DRDY（读 `ins_sample_us`）。
+  - 验收 1、2 的脚本还没写：读 `ins_sample_us`、`robot_last_tick`、TIM2 CNT、uwTick；OpenOCD 临时屏蔽 EXTI5，看兜底。
+  - `timing_watch.py` 只配 `d92bde5` 那份固件。
+  - `gimbal_watch.py` 照常能用：它读的 `ins_last_tick`、`ins_calibrate_count`、`ins_init_status`、`ins_feedback`、`ins_bmi088_temp_pid` 都还在，类型没变。
+
+## 2026-11-21 第 1 步上板（只读，加一次屏蔽 EXTI5）
+
+- 条件：
+  - CLion 编的 `build/Debug/Gimbal_test_RS05.elf` 和 `%TEMP%` 里编的逐字节相同，板子 flash 和它逐块相同。
+  - 24 V 在：加热占空比 14~19 %，温度 40.000 ℃。INS 已经标定（5000）、valid 1。云台模式 0。
+  - RS05 没回话：CAN1 TEC 128、最近一次错误“没有应答”，电机没上电或者 CAN 没接。和第 1 步无关。
+- 读法：临时脚本 `%TEMP%\drdy_check\check.py`（不进仓库，会被系统清理），用 `gimbal_watch.py` 的 `OpenOcd`、`spawn_openocd`，不停核、不复位。
+- 验收 1（ODR）：
+  - 连续读 `ins_sample_us` 15 s（6596 次）：跨 14996 个样本间隔，间隔 1000.338 µs → 999.662 Hz，慢 0.034 %，和第 0 步 40 ℃ 附近量的 999.67~999.69 一致。
+  - 读到的每个样本时刻都落在这个周期的整数倍上，偏差在 ±47 µs 以内（中断延迟，第 0 步看到过晚 46.5 µs 的）。
+  - DRDY → Robot_Loop 的延迟没量出来：一条 TCL 里先读 TIM2、再读样本时刻，两次读之间隔一个 USB 往返（0.5~1 ms，偶尔 9 ms），把延迟盖住了。要等 `cpu_profile.py` 改成以 DRDY 为零点。
+- 温度 100 ms 读一次：15 s 里每次读到的“上次读温度”都在 100 ms 以内，`ins_temp_tick` 15 s 走了 15005。
+- 验收 2（兜底）：把 EXTI_IMR 的 bit5 清 0，屏蔽 5 s 再放开。
+  - 屏蔽时：`ins_sample_us` 不变，valid 0；`robot_last_tick` 每次都比先读的 uwTick 新一格，说明每个 tick 都在跑（两个 tick 才跑一次的话会读到落后 0 的）；温度照读（最久 91 ms 前）；BMI088 状态一直是 IDLE。
+  - 放开后：样本时刻马上又在变（257 次读里变了 256 次），valid 1，IMR 回到 0x20。
+  - 屏蔽以后多久退回按 tick 跑，这样读分辨不出来；主机模拟里是 1.49 ms。
+- 验收 3（标定、漂移）：标定完、valid 1。yaw 87 s 里从 −0.066° 到 +0.266°，约 +0.23°/min，和以前约 0.3°/min（5 s 标定的随机误差约 0.27°/min，1σ）一个量级；时间太短，只算粗看。静止时角速度接近 0，dt 对不对在这里看不出来，要到第 5 条转起来跟编码器比。
+- `gimbal_watch.py --once` 对新固件照常能用。
+- 还没做：验收 4（插 USB、开 VOFA 跑 10 min）、验收 5（电机上电，编码器模式、IMU 模式和以前比）、DRDY → Robot_Loop 的延迟（先改 `cpu_profile.py`）。
+
+## 2026-11-21 cpu_profile.py 改成以 DRDY 为零点
+
+- 改了什么（`tools/cpu_profile.py`）：
+  - 采样时每 `GRID_EVERY`（25）个 PC 样本，再读一次 TIM2 CNT 和 `ins_sample_us`，存进样本文件 meta 的 `grid`。约 45 ms 一次，PC 样本少约 5 %。
+  - DRDY 时刻表：数出相邻两次读之间隔了几个 DRDY，先按 999.66 Hz 的大概间隔数，拟合出间隔以后再数一遍。拟合的残差是相位随温度的慢漂，用前后各 10 个点的滑动中位数跟上；离它超过 20 µs 的点不用（那次 EXTI 中断晚了）。
+  - CYCCNT 换成 TIM2 的 µs：两个钟出自同一个 PLL，正好 168 个周期 1 µs，只差一个固定偏移。偏移用每次读的 TIM2 取中位数粗估：读 TIM2 比读 CYCCNT 晚一个 USB 往返，准到 10 ms 以内就够，那段时间里 DRDY 的相位只漂零点几 ns。剩下的整体平移，按 EXTI（DRDY）中断样本相位的 1 % 分位归零。块读里 CYCCNT 比 PCSR 早读约 300 µs（SWD 1 MHz、隔 6 个字），这个固定偏移也一起被归零吸收了。
+  - 轮询时调的小函数（`POLL_HELPERS`：HAL_GetTick、INS_IsSampleReady、BMI088_IsSampleReady、INS_GetSampleUs、Robot_NowUs）默认算空转，落在 Robot_Loop 正忙的相位里的算回 Robot_Loop。原来只对 HAL_GetTick 这样做，判断忙闲用的相位也改成按 DRDY 算。
+  - 新表“DRDY 之后多久轮到”：每一项样本相位的 1 % / 50 % / 99 % 分位，1 % 约等于最早开始，99 % 约等于最晚结束。
+  - 固件里没有 `ins_sample_us`（旧固件、旧样本文件），或者样本时刻不变（DRDY 没来、在按 tick 跑）时，退回 SysTick 零点，表头打出原因。
+- 用假样本验过（`%TEMP%\cpu_profile_fake\gen.py`，临时的）：
+  - 做法：用真 ELF 里的函数地址，按定好的时间表合成 120 s 的样本。DRDY 999.662 Hz，相位慢漂 ±15 µs（40 s 一个来回）；中断延迟 0.3~2.3 µs，0.2 % 再晚 46.5 µs；CYCCNT 比 PC 早 280 µs 读；每 100 拍多 27 µs 读温度。
+  - 还原：ODR 999.662 Hz；去掉 7 个中断晚了的点，扣掉慢漂后散布 0.6 µs。起止时刻都落在设定值上：EXTI 0.2~7.2 µs（设定 0~6 加延迟）、两段 DMA 13.9~33.2（14~32）、Robot_Loop 33.6~111.4（33~111）、Gimbal_Update 最早 66.0（66）、DJI SendAll 103.8~110.8（104~110）。各项每拍的 µs 和设定值的差都在统计误差以内（Robot_Loop 78.8 / 设定 78.3，空转 904.7 / 905.5）。轮询小函数在 Robot_Loop 窗口两边各被算进去约 0.2 µs。
+  - 去掉时刻表、或者把样本时刻改成不变：都退回 SysTick 零点，原因打对了。
+- 上板：
+  - 第一次采到比对 flash 的第 5 块时，DAPLink 的 USB 报 Pipe error 断了；之后再连都是 `CMD_INFO failed`（Windows 里设备还在，没有别的程序占着）。拔插 DAPLink 才好，板子也跟着重启了。
+  - 拔插以后采了两次，各 120 s。第一次 14:03，开始时才上电 71 s，前半段 INS 还在升温、标定，INS_Update 比平时短。第二次 14:12，40 ℃、已标定。两次差不多，下面的数是第二次的（样本 `%TEMP%\cpu_profile\141205.json`）。
+  - 没接电机：CAN 接收是 0，发送邮箱一直满着。
+- 结果（-O0，一拍 = 一个 DRDY 周期）：
+  - ODR 999.665 Hz。
+  - CPU：Robot_Loop 每拍 58.7 µs（5.9 %，其中 INS_Update 24.2）；中断 26.0 µs（SPI1、DMA2 13.6，EXTI 2.1，几处共用的 HAL DMA 启动函数约 10）；空转 90.8 %。第 0 步时 Robot_Loop 每次 80.9 µs，里面有每拍阻塞读温度的约 27 µs。
+  - DRDY 之后多久轮到（µs，最早 1 % / 中位 / 最晚 99 %）：EXTI 0.1 / 7.6 / 60.5；两段 DMA 15.7 / 42.0 / 95.3；Robot_Loop 50.6 / 85.3 / 151.9；INS_Update 49.2 / 66.0 / 122.1；Gimbal_Update 72.9 / 82.9 / 154.5；Shoot_Update 82.2 / 88.6 / 164.5；RS05_Manager_SendAll 89.8 / 95.2 / 170.0；DJI_MotorManager_SendAll 99.9 / 104.9 / 154.5。
+  - 读法：正常的一拍里，DRDY 之后约 50 µs 两段 DMA 读完、Robot_Loop 开始，约 73~83 µs 云台开始算（用上这个样本），约 105 µs 发完 CAN。第 1 步估的“DRDY 到云台用上不到 0.1 ms”（-O0）是对的。
+  - DMA 这 50 µs 里，线上传输只有约 23 µs（15 字节、5.25 Mbit/s），其余约 27 µs 是 -O0 的 HAL：EXTI 里启动 DMA 约 7~8 µs（EXTI 自身 2.1，加上几处共用的 HAL DMA 启动函数约一半），两次 DMA 完成中断 13.6 µs 加上第二次启动 DMA 约 5 µs。第 1 步说“DMA 读法的 HAL 开销，看量出来的延迟再定”，就是这一块。
+  - 99 % 分位比中位晚 46~70 µs，是下面这条晚到的 DRDY。
+- 发现：约 18 % 的 DRDY 晚到约 46 µs（原因没查清）
+  - 时刻表里离慢漂远的点几乎都是晚 40~50 µs（第二次 469 / 2618，第一次 444 / 2614），早 40~50 µs 的只有十几个，其余都在 ±5 µs 以内。不是 0~46 µs 均匀分布，是固定晚一截。
+  - 升温中（17.0 %）和 40 ℃ 稳态（17.9 %）一样，和升温无关。
+  - 在 1 ms 里（对 SysTick 的相位）均匀分布，时间上零零散散，连着晚的次数和随机碰上的差不多：和 tick、Usb_SendGyro 这些按 tick 走的东西无关。
+  - 时间线里，晚的那几拍在 0~46 µs 之间 CPU 是空转的，没有别的代码挡着中断（CAN 没帧，USB 优先级 6 抢不了）。所以推断是 INT3 的上升沿本身晚了约 46 µs。没用示波器看过 PC5。
+  - 第 0 步也见过晚 46.5 µs 的（周期 1047 后跟 953），但那时很少：每秒算一次的 1000 周期 ODR 在 40 ℃ 稳在 999.67~999.69，要是 18 % 都晚 46 µs，约三成读数会差 ±46 ppm。第 1 步以后变多，最可能和“DRDY 一来就读 BMI088”有关，机理没查清。手册 4.2：读某轴的 LSB 会把它的 MSB 锁住，直到 MSB 读出来；4.7.2：存好 z 轴新数据之后才发中断。可是我们在 DRDY 之后 35~45 µs 读陀螺仪，离下一次存数据还有将近 1 ms，按这个解释对不上。
+  - 影响：INS 的 dt 这个长 46 µs、下一个短 46 µs，积分出来的角度不受影响；控制周期偶尔是 1046 / 954 µs，PID 用名义 dt，差 4.6 %，不管；离 1500 µs 的兜底门限还远。cpu_profile 表里的 99 % 分位含着这些拍。
+  - 要查的话：示波器或逻辑分析仪同时看 PC5（INT3）和两个片选（PA4、PB0）；或者临时把启动 DMA 推到 DRDY 之后几百 µs（改固件，量完撤），看晚到的比例会不会回到很少。

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Gimbal_test_RS05 的时序读数脚本：经 OpenOCD（DAPLink）不停核读 robot.c 开头那组时序测量量。
 
+只配第 0 步的测量代码：在提交 d92bde5 的 App/robot.c 里，之后从 robot.c 删了。要用先把那段加回去
+（git show d92bde5:Test_Module/Gimbal/Gimbal_test_RS05/App/robot.c），编译烧录后再跑。
+
 看什么：陀螺仪实际出样本的频率（ODR）、DRDY 周期的抖动、Robot_Loop 每拍拿到几个新样本、
 Robot_Loop 开始时最新样本的年龄、INS_Update 和整个 Robot_Loop 的耗时。
 
@@ -102,7 +105,8 @@ def find_symbols(elf):
     missing = [name for name in SYMBOLS if name not in symbols]
     if missing:
         sys.exit(f"ELF 里没有这些变量：{', '.join(missing)}\n"
-                 "（robot_* 是 robot.c 里的时序测量量：是不是还没编译加了测量的程序？是不是 Gimbal_test_RS05 的 ELF？）")
+                 "（robot_* 是第 0 步加在 robot.c 里的时序测量量，之后删了，原样在提交 d92bde5 里；"
+                 "是不是 Gimbal_test_RS05 的 ELF？）")
     wrong = [f"{name} {symbols[name][1]} 字节（脚本按 {size} 字节读）"
              for name, size in SYMBOLS.items() if symbols[name][1] != size]
     if wrong:

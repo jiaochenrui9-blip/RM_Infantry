@@ -56,6 +56,7 @@ typedef enum
     BMI088_STATE_IDLE = 0,
     BMI088_STATE_READING_ACC,
     BMI088_STATE_READING_GYRO,
+    BMI088_STATE_READING_TEMP,      /* BMI088_ReadTemperature 正在阻塞读 */
     BMI088_STATE_ERROR
 } BMI088_State_t;
 

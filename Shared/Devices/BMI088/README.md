@@ -10,7 +10,9 @@
 
 云台工程已由 CubeMX 配置 BMI088 SPI1（PB3 SCK、PB4 MISO、PA7 MOSI）、片选、DMA 和 PC4/PC5 普通输入。2026-10-29 起由 `Gimbal_test/App/ins` 接入：`INS_Init()` 调 `BMI088_Init()`，`INS_Update()` 每 1 ms 处理样本并启动下一次 DMA 采样，前 1000 个样本标定零偏和初始姿态；robot.c 把 HAL 的 SPI 完成 / 出错回调转给本驱动。只做过 ARM 编译和主机模拟，未上板。IST8310 的 I2C3（PA8/PC9）、PG6 复位和 PG3 DRDY 尚未配置，故不能使用磁力计。
 
-陀螺仪数据就绪（DRDY）：`BMI088_Init()` 打开新数据中断并映射到 INT3（推挽、高有效，每个新样本一个 280~400 µs 的高脉冲），三个寄存器也在回读校验里。C 板 INT3 接 PC5、F405 板接 PC4。Gimbal_test_RS05 把 PC5 配成上升沿 EXTI，在 robot.c 里计时；Gimbal_test、F405_Project 的这个脚还是普通输入，没用中断。驱动本身仍按调用 `BMI088_StartSample()` 的时刻读最新样本，不靠 DRDY。
+陀螺仪数据就绪（DRDY）：`BMI088_Init()` 打开新数据中断并映射到 INT3（推挽、高有效，每个新样本一个 280~400 µs 的高脉冲），三个寄存器也在回读校验里。C 板 INT3 接 PC5、F405 板接 PC4。Gimbal_test_RS05 把 PC5 配成上升沿 EXTI，在 EXTI 回调里调 `BMI088_StartSample()`，每个样本出来就读一次（见该工程 notes「第 1 步」）；Gimbal_test、F405_Project 的这个脚还是普通输入，仍在 1 ms 的主循环里调 `BMI088_StartSample()`，读的是那一刻最新的样本，和 DRDY 不同步。
+
+SPI 归属：`BMI088_StartSample()` 只在状态是 IDLE、上一个样本已经处理完（`BMI088_ProcessSample()` 清了 ready）时才启动 DMA，否则返回忙、不碰片选。`BMI088_ReadTemperature()` 阻塞读期间把状态置成 `BMI088_STATE_READING_TEMP`（关中断确认是 IDLE 再置），所以 StartSample 放在中断里调也不会把温度读截断。`BMI088_ReadID()`、`BMI088_CalibrateGyro()` 也是阻塞读，但没有占住 SPI，只能在没有中断启动采样的时候用；`BMI088_Init()` 里 initialized 置 1 之前 StartSample 一律返回错误，所以初始化本身不受影响。
 
 原版 `Attitude_CollectStartupAverage()` 等待 500 帧 BMI088 与 50 帧 IST8310，没有超时；当采样未运行或磁力计不可用时会一直等待。不要在当前工程直接调用该函数。只有 BMI088 时可以 `Attitude_Init()` 后用完整 IMU 样本调用 `Attitude_Update(&imu, NULL, dt_s)`；传入磁力计前需完成其外设和采样接入，统一坐标系并确认有效数据。`dt_s` 应为实际样本时间间隔。
 

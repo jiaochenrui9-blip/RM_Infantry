@@ -8,9 +8,9 @@
 #include "Attitude.h"
 #include "PID.h"
 
-#define INS_DT_S                 0.001f    /* INS_Update 的调用周期 */
 #define INS_CALIBRATE_SAMPLES    5000U     /* 到温后连续这么多个样本（约 5 s）用来标定，期间整车静止 */
-#define INS_SAMPLE_TIMEOUT_MS    10U       /* 超过这么久没有新样本，valid 置 0 */
+#define INS_SAMPLE_TIMEOUT_MS    10U       /* 超过这么久没有新样本，valid 置 0；隔了这么久才来的那个样本不积分（中间转了多少不知道） */
+#define INS_TEMP_PERIOD_MS       100U      /* 读温度、更新加热的周期。温度寄存器 1.28 s 才更新一次（手册 5.3.7） */
 #define INS_TEMP_BAND_C          0.25f     /* 标定期间温度要一直在目标 ±这么多以内（2 个 LSB），出去就从头标定 */
 #define INS_RAD_PER_DEG          0.0174532925f
 
@@ -20,12 +20,18 @@ static const float ins_install[3][3] = INS_INSTALL_MATRIX;
 static uint8_t ins_init_status = BMI088_ERR_NOT_INIT;   /* INS_Init 的返回值（BMI088_Status_t），0 为成功 */
 static uint32_t ins_calibrate_count;    /* 已用于标定的样本数，到 INS_CALIBRATE_SAMPLES 为止；升温时停在 0 */
 static uint32_t ins_last_tick;          /* 最后一次处理样本的 tick，正常时每毫秒跟着变 */
+static uint32_t ins_sample_us;          /* 最后一次处理的样本的 DRDY 时刻（INS_GyroDrdy 传进来的 us） */
 static float ins_gyro_sum[3];           /* 标定用的累加和，都在 C 板坐标系 */
 static float ins_acc_sum[3];
 static InsFeedback_t ins_feedback;
 
+/* 正在读、或者读完还没处理的那个样本的 DRDY 时刻。DRDY 中断里写，主循环在样本 ready 时读：
+   ready 期间驱动不启动下一次采样，中断也就不改它 */
+static volatile uint32_t ins_drdy_us;
+
 static TIM_HandleTypeDef *ins_heat_tim; /* 加热电阻的 PWM（C 板 TIM10_CH1），INS_Init 传进来 */
 static PID_t ins_bmi088_temp_pid;       /* 温度环：target 目标温度，actual 最近一次读到的温度，out 占空比 0~1 */
+static uint32_t ins_temp_tick;          /* 上一次读温度的 tick */
 
 /* 乘安装矩阵：C 板坐标系 → 云台头坐标系，原地改 */
 static void INS_Rotate(float v[3])
@@ -126,8 +132,8 @@ uint8_t INS_Init(SPI_HandleTypeDef *hspi, TIM_HandleTypeDef *htim)
     return ins_init_status;
 }
 
-/* 读温度、算加热占空比（0~1，1 为满功率 0.58 W）。读温度是阻塞读，要在 DMA 空闲时调（BMI088_StartSample 之前），
-   DMA 在跑时驱动返回 BMI088_ERR_BUSY。读失败返回 0，这一周期不加热 */
+/* 读温度、算加热占空比（0~1，1 为满功率 0.58 W）。读温度是阻塞读，DMA 在跑时驱动返回 BMI088_ERR_BUSY。
+   读失败返回 0，到下一次读之前不加热 */
 static float INS_Temp_Update(void)
 {
     float temp_c;
@@ -137,7 +143,7 @@ static float INS_Temp_Update(void)
         return 0.0f;
     }
 
-    return PID_Calculate(&ins_bmi088_temp_pid, temp_c, INS_DT_S);
+    return PID_Calculate(&ins_bmi088_temp_pid, temp_c, (float)INS_TEMP_PERIOD_MS * 0.001f);
 }
 
 /* 占空比换成 CCR：乘 ARR + 1。占空比为 1 时 CCR = ARR + 1，PWM1 模式下一直是高电平，就是满功率 */
@@ -147,9 +153,31 @@ static void INS_SetPWM(float PWM)
                           (uint32_t)(PWM * (float)(__HAL_TIM_GET_AUTORELOAD(ins_heat_tim) + 1U)));
 }
 
+void INS_GyroDrdy(uint32_t now_us)
+{
+    /* 驱动拒绝时（上一个样本还没处理、正在读温度、没初始化）不记：这时记了，时刻就和缓冲区里的样本对不上。
+       SPI / DMA 出过错时，驱动会在这里自动复位重试 */
+    if (BMI088_StartSample() == HAL_OK)
+    {
+        ins_drdy_us = now_us;
+    }
+}
+
+uint8_t INS_IsSampleReady(void)
+{
+    return BMI088_IsSampleReady();
+}
+
+uint32_t INS_GetSampleUs(void)
+{
+    return ins_sample_us;
+}
+
 void INS_Update(uint32_t now_tick)
 {
     BMI088_Data_t sample;
+    uint32_t sample_us;
+    uint32_t dt_us;
 
     /* 初始化失败：valid 一直为 0。不在这里重试，BMI088_Init 里的延时共约 85 ms，会卡住控制 */
     if (ins_init_status != BMI088_OK)
@@ -157,12 +185,13 @@ void INS_Update(uint32_t now_tick)
         return;
     }
 
-    /* 0. 先读取BMI088的温度值，然后设置占空比。上一周期启动的 DMA 早就读完了，这时 SPI 空闲 */
-    INS_SetPWM(INS_Temp_Update());
-
-    /* 1. 上一周期启动的 DMA 读完了：取样本（C 板坐标系，已减零偏） */
+    /* 1. DRDY 中断启动的 DMA 读完了：取样本（C 板坐标系，已减零偏）。
+          先取时刻再处理：ProcessSample 最后清 ready，清完下一个 DRDY 就能启动采样、改写 ins_drdy_us */
     if (BMI088_IsSampleReady() != 0U)
     {
+        sample_us = ins_drdy_us;
+        dt_us = sample_us - ins_sample_us;
+        ins_sample_us = sample_us;
         BMI088_ProcessSample();
         BMI088_GetData(&sample);
         ins_last_tick = now_tick;
@@ -186,15 +215,25 @@ void INS_Update(uint32_t now_tick)
             /* 先转到云台头坐标系再解算，不要解算完再去换欧拉角 */
             INS_Rotate(sample.gyro_dps);
             INS_Rotate(sample.acc_g);
-            Attitude_Update(&sample, NULL, INS_DT_S);
+            /* dt 用相邻两个样本的时刻：样本按陀螺仪自己的时钟出（手册 ODR ±0.3 %），写死 1 ms 会把这个差积进角度。
+               中断延迟让单个 dt 抖几 us，但前一个长、后一个就短，加起来不差 */
+            if (dt_us <= INS_SAMPLE_TIMEOUT_MS * 1000U)
+            {
+                Attitude_Update(&sample, NULL, (float)dt_us * 1.0e-6f);
+            }
             INS_UpdateFeedback(sample.gyro_dps);
         }
     }
 
-    /* 2. 不管这周期有没有样本都启动下一次。SPI / DMA 出过错时，驱动会在这里自动复位重试 */
-    (void)BMI088_StartSample();
+    /* 2. 读温度、更新加热占空比。按 tick 计，样本停了也接着读（读失败就关加热）。
+          放在处理样本之后：正常时离下一个 DRDY 还有 900 多 us，不和 DMA 抢 SPI */
+    if ((now_tick - ins_temp_tick) >= INS_TEMP_PERIOD_MS)
+    {
+        ins_temp_tick = now_tick;
+        INS_SetPWM(INS_Temp_Update());
+    }
 
-    /* 3. 每周期重算：标定完、且最近 10 ms 内有新样本。采样恢复后自动回到 1，锁定交给云台 */
+    /* 3. 每次重算：标定完、且最近 10 ms 内有新样本。采样恢复后自动回到 1，锁定交给云台 */
     ins_feedback.valid = ((ins_calibrate_count >= INS_CALIBRATE_SAMPLES) &&
                           ((now_tick - ins_last_tick) <= INS_SAMPLE_TIMEOUT_MS)) ? 1U : 0U;
 }

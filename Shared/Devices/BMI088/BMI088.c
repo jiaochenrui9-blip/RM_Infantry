@@ -341,12 +341,14 @@ static uint8_t BMI088_ReadGyroRawBlocking(int16_t *gx, int16_t *gy, int16_t *gz)
     BMI088_DATA.gyro_raw[2] = *gz;
     return BMI088_OK;
 }
-//读取温度
+//读取温度（阻塞读）。读的时候状态置成 READING_TEMP 占住 SPI：中断里调的 BMI088_StartSample 看到不是 IDLE 就返回忙、不碰片选，
+//不然它会在温度读到一半时拉片选、启动 DMA，温度或那个样本的加速度读成乱数
 uint8_t BMI088_ReadTemperature(float *temp)
 {
     uint8_t buf[2];
     uint16_t temp_uint11;
     int16_t temp_int11;
+    uint32_t primask;
 
     if (temp == NULL)
     {
@@ -356,13 +358,20 @@ uint8_t BMI088_ReadTemperature(float *temp)
     {
         return BMI088_ERR_NOT_INIT;
     }
+    //看状态和改状态之间关中断：不然中间进来的 StartSample 也看到 IDLE，两边一起用 SPI
+    primask = __get_PRIMASK();
+    __disable_irq();
     if (BMI088_STATE != BMI088_STATE_IDLE)
     {
+        __set_PRIMASK(primask);
         return BMI088_ERR_BUSY;
     }
+    BMI088_STATE = BMI088_STATE_READING_TEMP;
+    __set_PRIMASK(primask);
 
     BMI088_IO_OK = 1u;
     BMI088_Acc_ReadRegs(BMI088_ACC_TEMP_REG, buf, sizeof(buf));
+    BMI088_STATE = BMI088_STATE_IDLE;
     if (BMI088_IO_OK == 0u)
     {
         return BMI088_ERR_SPI;
