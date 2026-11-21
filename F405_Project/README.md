@@ -7,7 +7,7 @@
 | 总线 | 接什么 | 帧 |
 |---|---|---|
 | CAN1：PB8 RX / PB9 TX，STB 接 PC1；插座 CN7、CN15（2-pin：1 CANL、2 CANH） | 四个 C620 + M3508（全向轮，装在四角），电调 ID 1 前右、2 后右、3 后左、4 前左（俯视顺时针） | 每 1 ms 发一帧 0x200，收反馈 0x201~0x204 |
-| CAN2：PB12 RX / PB13 TX，STB 接 PC2；插座 CN8、CN9（4-pin：1 5V、2 GND、3 CANH、4 CANL） | 板间：经底盘的分电板、滑环到云台 C 板的 CAN1，这一路上还有云台的两个 RS05 | 只收 0x110（云台板每 1 ms 发一帧），不发 |
+| CAN2：PB12 RX / PB13 TX，STB 接 PC2；插座 CN8、CN9（4-pin：1 5V、2 GND、3 CANH、4 CANL） | 板间：经底盘的分电板、滑环到云台 C 板的 CAN1，这一路上还有云台的两个 RS05 | 只收 0x110（云台板每 10 ms 发一帧），不发 |
 
 - 两路都是 1 Mbps，开了自动离线恢复和自动重发；板上各有一个 120 Ω 终端（R10、R11，没有开关）。
 - 两个 CAN 收发器的 STB 由 MCU 拉低才工作，改 .ioc 时别删 PC1、PC2。
@@ -39,6 +39,6 @@
 
 - `chassis_mode`、`chassis_fault`、收到的指令 `chassis_cmd`，斜坡后的 `chassis_vx_mps`、`chassis_vy_mps`、`chassis_wz_dps`（都在 `Infantry_Chassis.c`）。
 - `chassis_motors[0..3]` 的 `feedback_count`（涨就说明收到反馈）、`speed_rpm`（转子 rpm）、`speed.target_rpm`、`output_current`。下标是前左、前右、后右、后左，对应电调 ID 4、1、2、3。
-- 板间最后一帧的时间 `chassis_link_tick`（在 `chassis_link.c`），它跟着 HAL tick 走就说明在收 0x110。
+- 板间最后一帧的时间 `chassis_link_tick`（在 `chassis_link.c`），它每 10 ms 跳一次、离 HAL tick 不超过 10 ms 左右，就说明在收 0x110。
 
 第一次接电机：先架空底盘，电流限幅保持小值（现在 3000，约 3.7 A），按 `Test_Module/Chassis/Chassis_test/notes.md`「上板步骤与验收」一步步来；那边写的“4 个 C620 接 CAN2”，在这块板上是 CAN1。

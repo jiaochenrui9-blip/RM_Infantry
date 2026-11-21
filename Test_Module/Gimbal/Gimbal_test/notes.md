@@ -1,7 +1,7 @@
 # Gimbal_test 笔记（云台测试工程）
 
 > 本工程的进度与注意事项。跨模块约定（分层、接口、单位、正方向、CAN 分配、C 板引脚）见 `RM_Infantry/notes.md`；驱动移植细节和验证记录见本目录 `README.md`；BMI088 / Attitude 的接入说明见 `Shared/Devices/BMI088/README.md`。
-> 最后更新：2026-11-07（更正「换 RS05」的「中值（零点）」：11-04 写的"上电可能差整数个 46.45°"是错的，用户的果园机器人工程实测过 RS05 上电位置在输出轴一圈内是绝对的，中值能像 GM6020 那样写死）。2026-11-05（v2 第 3 步加热恒温：用户第一版审查出 12 处要改，用户让 Claude 改好了，ARM 编译无警告、主机模型里符合预期，还没上板，见「第 3 步进度」。2026-11-04 定了接口，.ioc 配好 TIM10 并生成。11-04 早些时候：云台电机可能换成 RS05：驱动写好放在 Shared/Devices/RS05，本工程还是 GM6020、代码没动；换的步骤见「换 RS05」）
+> 最后更新：2026-11-21（板间 0x110 降到 100 Hz：robot.c 按 tick 差每 `CHASSIS_LINK_PERIOD_MS` 发一帧，和 Gimbal_test_RS05 一起改的；ARM 0 警告，HostTest 15 过 1 跳过；没上板。见「板间通信」，细节在根目录 notes 最后一节）。2026-11-07（更正「换 RS05」的「中值（零点）」：11-04 写的"上电可能差整数个 46.45°"是错的，用户的果园机器人工程实测过 RS05 上电位置在输出轴一圈内是绝对的，中值能像 GM6020 那样写死）。2026-11-05（v2 第 3 步加热恒温：用户第一版审查出 12 处要改，用户让 Claude 改好了，ARM 编译无警告、主机模型里符合预期，还没上板，见「第 3 步进度」。2026-11-04 定了接口，.ioc 配好 TIM10 并生成。11-04 早些时候：云台电机可能换成 RS05：驱动写好放在 Shared/Devices/RS05，本工程还是 GM6020、代码没动；换的步骤见「换 RS05」）
 
 ## 当前状态
 
@@ -437,7 +437,7 @@ HostTest：ins.h 的声明用到 `TIM_HandleTypeDef`，`HostTest/stub/main.h` �
 
 ## 板间通信：云台板发底盘指令（2026-11-03 定接口，用户写）
 
-双板方案里云台板是主控：每 1 ms 把底盘指令 `ChassisCmd_t` 经板间 CAN 帧 0x110 发给底盘板。底盘板的接收 2026-11-01 已写好，帧格式见 `Shared/Link/chassis_link.h` 开头（解释见 Chassis_test/notes.md「接口」）。
+双板方案里云台板是主控：每 10 ms（`CHASSIS_LINK_PERIOD_MS`；2026-11-21 以前是每 1 ms，见下面「为什么这样写」最后一条）把底盘指令 `ChassisCmd_t` 经板间 CAN 帧 0x110 发给底盘板。底盘板的接收 2026-11-01 已写好，帧格式见 `Shared/Link/chassis_link.h` 开头（解释见 Chassis_test/notes.md「接口」）。
 
 2026-11-03 已做（Claude，按用户的选择）：`chassis_link.c/.h` 从 Chassis_test/App 原样搬到 `Shared/Link`，`ChassisMode_e`、`ChassisCmd_t` 从 Infantry_Chassis.h 移进 chassis_link.h，两个工程编译同一份，帧格式和模式编号只有一处；chassis_link.h 加了 `ChassisLink_SendCmd` 的声明；本工程 CMake 加了 `Shared/Link/chassis_link.c` 和 include 目录 `Shared/Link`。代码逻辑没改：两个工程清理编译无警告，烧进 Flash 的内容和搬之前逐字节相同。
 
@@ -489,7 +489,7 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 - 降成 NO_FOLLOW 而不是 RELAX：底盘还有力，wz 按斜坡停下来（720°/s² 时从 180°/s 停下约 0.25 s），平移照常；RELAX 是断电滑行。判断用实际模式、不用指令：云台被锁在 RELAX 时，指令还是 IMU。
 - 联锁放在指令源：链路只管传；底盘板不知道云台在什么模式。
 - SendCmd 放在 SendAll 之后：每毫秒 CAN1 上云台板只发 0x1FE 和 0x110 两帧，3 个邮箱够用；两帧都在邮箱里时 bxCAN 按 ID 先发 0x110（`TransmitFifoPriority = DISABLE`），先后其实无所谓。
-- 每 1 ms 发：底盘板 50 ms 超时，偶尔丢一帧不要紧；云台角的延迟也小（小陀螺 180°/s 时 1 ms 差 0.18°）。
+- 每 1 ms 发：底盘板 50 ms 超时，偶尔丢一帧不要紧；云台角的延迟也小（小陀螺 180°/s 时 1 ms 差 0.18°）。2026-11-21 改成每 10 ms：RS05 那一路加 1 kHz 的 0x110 负载 64%~78%，降到 100 Hz 是 54%~65%；50 ms 超时是连丢 5 帧；底盘拿到的相对角每 10 ms 才更新，每 100°/s 比 1 kHz 时最多多落后约 1°（180°/s 时约 1.8°），跟随环比这慢得多。见根目录 notes 最后一节。
 
 容易错的地方：
 
@@ -504,7 +504,7 @@ void GimbalTestCmd_Update(uint32_t now_tick, const GimbalFeedback_t *feedback,
 
 1. 接线：两块板的 CAN1（2-pin 口）直连，CANL 接 CANL、CANH 接 CANH；两块板都接 24 V 或插 USB。按原理图两块板都有板载 120 Ω（根目录 notes 第 5 节），正好是总线两头的两个终端；以后这路上挂 GM6020 时，它们的终端电阻都关。
 2. 只有一个调试器时：云台板上把 `gimbal_test` 的初值临时写成 `.gimbal_mode = GIMBAL_MODE_IMU, .chassis_mode = CHASSIS_MODE_FOLLOW, .vx_mps = -1.234f, .vy_mps = 0.567f`，烧好后让它自己跑；调试器接底盘板（Chassis_test），看：
-   - `chassis_link_tick` 跟着 HAL tick 走（每毫秒都收到）；
+   - `chassis_link_tick` 跟着 HAL tick 走（每 10 ms 跳一次，离 HAL tick 不超过 10 ms 左右；2026-11-21 以前是每毫秒都收到）；
    - Infantry_Chassis.c 的 `chassis_cmd`：mode 1、vx −1.234、vy 0.567、gimbal_yaw_rel_deg 0（yaw 电机没接，编码器角一直是 0）。云台指令是 IMU，但没电机时被锁在 RELAX，联锁看实际模式才会把 FOLLOW 降成 1；收到 2 就是联锁看成了指令模式。vx 取负数、绝对值超过 0.256 m/s，高字节才不为 0，字节拼错能看出来（第一版的错误会收成 −0.210）。底盘没电机，`chassis_fault` = 1、`chassis_mode` 是 RELAX，这是对的；`chassis_cmd` 是收到的指令，不受影响。
    - 测完把初值改回去。有两个调试器就直接在云台板上改 `gimbal_test`。
    - 这一条原来（2026-11-03 定接口时）写的是 vx 0.123、云台保持无力：vx 的高字节正好是 0，云台指令和实际都是 RELAX，下面「第一版审查」里的两个错都看不出来，已改。
@@ -765,14 +765,14 @@ gimbal.c：
 
 ### CAN（这几条是换的时候必须注意的）
 
-- 负载：每个 RS05 每毫秒一帧指令 + 一帧应答，都是扩展帧（131~160 bit）。两个 RS05 加 0x110 约 64%~78%，现在两个 GM6020 是 44%~54%。双板方案嫌 CAN1 太满，可以把 RS05 接云台板的 CAN2（单板方案 CAN2 是底盘，不行），只改 robot.c 一处；不过 0x110 要的 CAN1 就得另外启动（现在是电机 manager 的 Start 顺带启动的）。
+- 负载：每个 RS05 每毫秒一帧指令 + 一帧应答，都是扩展帧（131~160 bit）。两个 RS05 加 0x110 约 64%~78%，现在两个 GM6020 是 44%~54%（都是 0x110 1 kHz 时算的；2026-11-21 降到 100 Hz 以后约 54%~65%、34%~42%）。双板方案嫌 CAN1 太满，可以把 RS05 接云台板的 CAN2（单板方案 CAN2 是底盘，不行），只改 robot.c 一处；不过 0x110 要的 CAN1 就得另外启动（现在是电机 manager 的 Start 顺带启动的）。
 - 仲裁：RS05 应答（类型 2）的前 11 位是 0x080~0x0BF，比 0x110、比发给 RS05 的所有指令（使能 0x0C0、停止 0x100、写参数 0x480）都优先。
   - 现在 CAN1 是 `AutoRetransmission = DISABLE`，仲裁输了也不重发。按现在 robot.c 的顺序（先发电机帧、后发 0x110）：yaw 指令先发出去，邮箱里 0x110 比 pitch 指令优先，接着发 0x110。0x110 发完时，yaw 的应答如果已经准备好，就和 pitch 指令同时起步，pitch 指令输掉、丢掉；RELAX 时丢的是 0x110。
   - 会不会撞上取决于电机回应答的延迟（手册没写）。GM6020 时没这个问题，因为 0x1FE、0x110 都比它的反馈（0x205、0x206）优先。
   - 所以要开自动重发。代价：总线上没有别的节点应答时（电机、底盘板都没上电），3 个邮箱一直重发、占着，新帧返回 HAL_BUSY；有节点上电后先发出邮箱里最多 3 帧旧帧。RELAX 时那是停止帧，闭环时是旧的 iq_ref，电机刚上电在 Reset，不会执行。
   - 不开的话，robot.c 要先发 0x110、再发 RS05，让 C 板这三帧背靠背发完。这靠时序，主循环被中断拖慢就可能又撞上。
   - 不开重发还有一个后果：使能序列里某一帧在总线上丢了，驱动发现不了（"2 ms 没回反馈就重来"只看电机有没有在回话）。比如刚上电的电机丢了 run_mode 那一帧，就会停在运控模式里，写 iq_ref 不出力、反馈却显示在运行，要给一次 RELAX 再进闭环才恢复。
-- 邮箱：F4 每路 3 个发送邮箱。每周期 yaw、pitch 各一帧，加 0x110，正好 3 个，这一路上别再加别的周期帧。
+- 邮箱：F4 每路 3 个发送邮箱。每周期 yaw、pitch 各一帧，加 0x110，正好 3 个，这一路上别再加别的周期帧（0x110 降到 100 Hz 以后只有发它的那个周期用满，再加周期帧要错开那个周期）。
 - 过滤器：RS05 用 CAN1 组 1（can_bus.h 预留的），只收类型 2。底盘板的 CAN1 也在这一路上，它的过滤器只收标准帧，RS05 的帧进不来。
 
 ### 和 GM6020 不一样的地方

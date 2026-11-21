@@ -43,7 +43,7 @@
 | 大疆过滤器 / 0x110 过滤器 | CAN1 组 0 / CAN2 组 16 | CAN2 组 14 / CAN1 组 2 |
 
 - 上电默认 RELAX：CAN1 每 1 ms 发一帧全 0 的 0x200；CAN2 只收不发（这一路的 manager 没有电机，SendAll 什么也不发）。CAN2 上还有云台的两个 RS05，都是扩展帧，两个过滤器都不收；CAN2 的大疆过滤器（组 14）照样开着，这一路上没有大疆电机，收不到东西。
-- 指令只认 CAN2 来的 0x110：50 ms 没收到就 RELAX。云台板 `Gimbal_test_RS05` 每 1 ms 在它的 CAN1 上发（指令来自它的 test_cmd 调试变量）。云台主控上电要先发一段 RELAX：底盘电机还没反馈就收到运动模式会锁住，要再收到一次 RELAX 才解除。
+- 指令只认 CAN2 来的 0x110：50 ms 没收到就 RELAX。云台板 `Gimbal_test_RS05` 每 10 ms 在它的 CAN1 上发一帧（指令来自它的 test_cmd 调试变量；2026-11-21 从每 1 ms 改的，这块板的固件没变，见根目录 notes 最后一节）。云台主控上电要先发一段 RELAX：底盘电机还没反馈就收到运动模式会锁住，要再收到一次 RELAX 才解除。
 - 没有云台板时单独测底盘：`robot.c` 里临时把 `ChassisLink_GetCmd` 换成调试器改的 `volatile ChassisCmd_t`，或者用 USB-CAN 往 CN8 / CN9 发 0x110（格式见 `Shared/Link/chassis_link.h`）。
 - 自动重发：CAN1 上 0x200 比四个反馈（0x201~0x204）优先，不会输掉仲裁，只有出错或没人应答（电调没上电）时才重发；电调都没上电时第一帧一直在重发，后面两帧排在另外两个邮箱里，三个邮箱占满以后 SendAll 返回 HAL_BUSY（robot.c 忽略）；电调上电后先补发这三帧，它们是电机掉线时发的，底盘那时是 RELAX，都是 0。CAN2 这块板不发，没影响；以后加底盘 → 云台回传帧正好要它（根目录 notes 第 4 节）。
 - 调试器里看：`chassis_mode`、`chassis_fault`、斜坡后的 `chassis_vx_mps` / `chassis_vy_mps` / `chassis_wz_dps`、收到的指令 `chassis_cmd`（这几个在 `Infantry_Chassis.c`）；`chassis_motors[0..3]`（前左、前右、后右、后左，即 ID 4、1、2、3）的 `feedback_count`、`speed_rpm`、`speed.target_rpm`、`output_current`；板间最后一帧的时间 `chassis_link_tick`（`chassis_link.c`）。

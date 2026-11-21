@@ -26,6 +26,7 @@ static DJI_MotorManager_t robot_can2;
 #define ROBOT_SAMPLE_TIMEOUT_US  1500U
 
 static uint32_t robot_last_tick;
+static uint32_t robot_link_tick;    /* 上次发 0x110 时的 tick */
 
 /* TIM2 的计数：1 MHz，单位 us；32 位约 71.6 min 回绕一次，两个时刻按 uint32_t 相减不受回绕影响 */
 static uint32_t Robot_NowUs(void)
@@ -118,10 +119,15 @@ void Robot_Loop(void)
           所以每个电机每周期都要发一帧（RELAX 时是停止帧）。 */
     (void)RS05_Manager_SendAll(&robot_can1);
 
-    /* 板间指令 0x110 发给底盘板（两块板之间那路，云台板默认 CAN1）。放在 SendAll 后面：
-       邮箱不够时先让电机帧进邮箱。两个 RS05 加 0x110 正好占满 3 个发送邮箱，这一路别再加周期帧。
-       CAN1 在 .ioc 里开了自动重发：RS05 的应答比这三帧都优先，仲裁输了要靠重发（根目录 notes.md 第 4 节）。 */
-    (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    /* 板间指令 0x110 发给底盘板（两块板之间那路，云台板默认 CAN1），每 CHASSIS_LINK_PERIOD_MS 一帧。放在 SendAll 后面：
+       邮箱不够时先让电机帧进邮箱。发 0x110 的那一周期，两个 RS05 加 0x110 正好占满 3 个发送邮箱。
+       CAN1 在 .ioc 里开了自动重发：RS05 的应答比这三帧都优先，仲裁输了要靠重发（根目录 notes.md 第 4 节）。
+       按 tick 差判、不按 tick 取余：跟着陀螺仪跑时两次之间 tick 可能走 2，取余会正好跳过要发的那个 tick。 */
+    if ((now - robot_link_tick) >= CHASSIS_LINK_PERIOD_MS)
+    {
+        robot_link_tick = now;
+        (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    }
 
     /* 三个大疆电机合成一帧 0x200；第四槽为零。CAN2 邮箱与 CAN1 独立。 */
     (void)DJI_MotorManager_SendAll(&robot_can2);

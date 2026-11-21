@@ -18,6 +18,7 @@ static DJI_MotorManager_t robot_can1;
 static DJI_MotorManager_t robot_can2;
 
 static uint32_t robot_last_tick;
+static uint32_t robot_link_tick;    /* 上次发 0x110 时的 tick */
 
 void Robot_Init(void)
 {
@@ -77,9 +78,14 @@ void Robot_Loop(void)
     (void)DJI_MotorManager_SendAll(&robot_can1);
     (void)DJI_MotorManager_SendAll(&robot_can2);
 
-    /* 板间指令 0x110 发给底盘板（两块板之间那路，云台板默认 CAN1）。放在 SendAll 后面：
-       邮箱不够时先让电机帧进邮箱。两帧都进了邮箱时，硬件按 ID 先发 0x110，和调用顺序无关。 */
-    (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    /* 板间指令 0x110 发给底盘板（两块板之间那路，云台板默认 CAN1），每 CHASSIS_LINK_PERIOD_MS 一帧。放在 SendAll 后面：
+       邮箱不够时先让电机帧进邮箱。两帧都进了邮箱时，硬件按 ID 先发 0x110，和调用顺序无关。
+       按 tick 差判、不按 tick 取余：主循环被拖过 1 ms 时 tick 会跳，取余会正好跳过要发的那个 tick。 */
+    if ((now - robot_link_tick) >= CHASSIS_LINK_PERIOD_MS)
+    {
+        robot_link_tick = now;
+        (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    }
 }
 
 /* HAL 的 CAN 接收回调：每次读一帧，按总线交给对应的 manager。

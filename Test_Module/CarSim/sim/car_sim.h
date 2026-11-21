@@ -10,8 +10,8 @@
 
 /*
  * 整车主机仿真：两块板的真代码编在一起，接一个整车模型。
- *   云台板：gimbal.c + gimbal_test_cmd.c，每 1 ms 的顺序同 Gimbal_test/App/robot.c，最后 ChassisLink_SendCmd 发 0x110
- *   底盘板：Infantry_Chassis.c，顺序同 Chassis_test/App/robot.c，ChassisLink_GetCmd 收 0x110（比云台板晚 1 ms 用上）
+ *   云台板：gimbal.c + gimbal_test_cmd.c，每 1 ms 的顺序同 Gimbal_test/App/robot.c，最后每 CHASSIS_LINK_PERIOD_MS 用 ChassisLink_SendCmd 发一帧 0x110
+ *   底盘板：Infantry_Chassis.c，顺序同 Chassis_test/App/robot.c，ChassisLink_GetCmd 收 0x110（发出后 1~10 ms 内的每个周期用的都是这一帧）
  *   模型：两个 GM6020 云台轴（yaw 的底座就是底盘，跟着底盘转）+ 4 个 M3508 全向轮（四角装）推动的刚体底盘 + 理想 IMU
  * 只有 HAL 和 CAN 收发是假的（stub/ 和 HostTest 的 stub/main.h），电机反馈按真实帧格式送进 DJI 驱动。
  *

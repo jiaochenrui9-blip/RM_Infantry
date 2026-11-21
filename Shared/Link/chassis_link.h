@@ -6,7 +6,7 @@
 /*
  * 板间通信（双板方案）：云台主控把底盘指令发给底盘板。
  * 两块板编译同一份文件，模式编号和帧格式只在这里定义；改了两个工程都要重编、两块板都要重烧。
- * 帧格式：标准数据帧 0x110，DLC 8，每 1 ms 一帧，高字节在前（和大疆电机帧一样）
+ * 帧格式：标准数据帧 0x110，DLC 8，每 CHASSIS_LINK_PERIOD_MS 一帧，高字节在前（和大疆电机帧一样）
  *   DATA[0]     mode（ChassisMode_e）
  *   DATA[1]     保留，发 0
  *   DATA[2..3]  vx，int16，mm/s
@@ -14,7 +14,12 @@
  *   DATA[6..7]  gimbal_yaw_rel，int16，0.01°
  */
 #define CHASSIS_LINK_CMD_ID         0x110U
-#define CHASSIS_LINK_TIMEOUT_MS     50U     /* 超过这么久没收到新帧就当 RELAX */
+
+/* 云台板每隔这么久发一帧（100 Hz）。这路上两个 RS05 每 1 ms 一问一答，4 个扩展帧（每帧 131~160 bit）已占 1 Mbps 的
+   52%~64%；0x110 一帧 111~135 bit，1 kHz 时要再占 11%~13.5%，100 Hz 只占 1.1%~1.35%。
+   代价是底盘 10 ms 才拿到一次新的云台相对角，两帧之间这个角不变：底盘每转 100°/s，最多比实际落后约 1°。 */
+#define CHASSIS_LINK_PERIOD_MS      10U
+#define CHASSIS_LINK_TIMEOUT_MS     50U     /* 超过这么久没收到新帧就当 RELAX（100 Hz 时连丢 5 帧） */
 
 /*底盘模式，由云台主控配置，板间通信（CAN）传过来*/
 typedef enum
@@ -44,9 +49,9 @@ void ChassisLink_GetCmd(uint32_t now_tick, ChassisCmd_t *cmd);
 
 /* ---- 云台板调 ---- */
 
-/* 主循环每 1 ms 调一次，放在各路 SendAll 之后；hcan 传两块板之间那路（云台板默认 CAN1）。按上面的帧格式打包发出。
-   只发不收，不用 Init：CAN 已由 DJI_MotorManager_Start 启动。速度、角度先限到 int16 装得下的范围再转换。
-   cmd 为 NULL 返回 HAL_ERROR；其余返回 CAN_Bus_SendStdData 的结果，3 个发送邮箱都满时是 HAL_BUSY（这一帧丢掉，下一毫秒照常发）。 */
+/* 每 CHASSIS_LINK_PERIOD_MS 调一次（什么时候调由 robot.c 定），放在各路 SendAll 之后；hcan 传两块板之间那路（云台板默认 CAN1）。
+   按上面的帧格式打包发出。只发不收，不用 Init：CAN 已由这路上电机 manager 的 Start 启动。速度、角度先限到 int16 装得下的范围再转换。
+   cmd 为 NULL 返回 HAL_ERROR；其余返回 CAN_Bus_SendStdData 的结果，3 个发送邮箱都满时是 HAL_BUSY（这一帧丢掉，下一个周期照常发）。 */
 HAL_StatusTypeDef ChassisLink_SendCmd(CAN_HandleTypeDef *hcan, const ChassisCmd_t *cmd);
 
 #endif /* CHASSIS_LINK_H */

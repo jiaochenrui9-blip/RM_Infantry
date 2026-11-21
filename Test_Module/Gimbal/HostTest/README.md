@@ -56,7 +56,7 @@ sim/：两个刚体轴 + 底盘 + 理想 IMU ─────┘
 |---|---|
 | `stub/main.h` | 假的 HAL：`HAL_StatusTypeDef`、CAN 句柄和帧头、`HAL_GetTick`、开关中断。驱动以后用到新的 HAL 符号，编译报错时在这里补 |
 | `stub/can_bus_stub.c` | 代替 `Shared/BSP/can_bus.c`：过滤器和启动直接成功，发出去的帧交给模型 |
-| `Shared/Link/chassis_link.c`（真代码） | 云台板每周期发 0x110；模型把这一帧交给同一个文件里底盘板用的 `ChassisLink_ProcessRxFrame`，`Sim_ChassisCmd` 再用 `ChassisLink_GetCmd` 解出来，等于两块板之间的打包、解包、超时一起测 |
+| `Shared/Link/chassis_link.c`（真代码） | 云台板每 10 ms 发一帧 0x110（`CHASSIS_LINK_PERIOD_MS`，和 robot.c 一样）；模型把这一帧交给同一个文件里底盘板用的 `ChassisLink_ProcessRxFrame`，`Sim_ChassisCmd` 再用 `ChassisLink_GetCmd` 解出来，等于两块板之间的打包、解包、超时一起测 |
 | `sim/gimbal_sim.c` | 模型和 1 ms 循环。每个周期：按真实帧格式把编码器（8192 档）、转速（整数 rpm）送进 `DJI_MotorManager_ProcessRxFrame` → IMU → 指令 → `Gimbal_Update` → `SendAll` → 从控制帧取电流 → 模型积分 1 ms |
 | `test_gimbal.c` | 测试场景和 `main` |
 

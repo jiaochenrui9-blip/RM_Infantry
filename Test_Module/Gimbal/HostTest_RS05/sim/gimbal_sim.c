@@ -62,6 +62,7 @@ static RS05_Manager_t sim_can1;     /* 和 robot.c 一样，两个云台电机�
 static SimMotor_t sim_yaw_motor;
 static SimMotor_t sim_pitch_motor;
 static uint32_t sim_tick;
+static uint32_t sim_link_tick;      /* 上次发 0x110 时的 tick */
 static InsFeedback_t sim_imu;
 
 uint32_t HAL_GetTick(void)
@@ -335,7 +336,11 @@ static void Sim_Step(void)
 
     Gimbal_Update(sim_tick);
     (void)RS05_Manager_SendAll(&sim_can1);
-    (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    if ((sim_tick - sim_link_tick) >= CHASSIS_LINK_PERIOD_MS)
+    {
+        sim_link_tick = sim_tick;
+        (void)ChassisLink_SendCmd(&hcan1, &chassis_cmd);
+    }
 
     /* 3. 模型按电机实际输出的 iq 往前走 1 ms */
     sim.yaw.cmd_current = (int16_t)lroundf(Sim_MotorIq(&sim_yaw_motor) * 1000.0f);

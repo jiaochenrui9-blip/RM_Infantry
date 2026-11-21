@@ -181,7 +181,7 @@ chassis_config.h：
 | 4~5 | vy，int16，mm/s |
 | 6~7 | gimbal_yaw_rel，int16，0.01°（±180° 是 ±18000） |
 
-标准帧 0x110，DLC 8，云台板每 1 ms 发一次，高字节在前（和大疆电机帧一样）。走两块板之间那路 CAN：底盘板默认 CAN1（电机在 CAN2）。
+标准帧 0x110，DLC 8，云台板每 10 ms 发一次（`CHASSIS_LINK_PERIOD_MS`，2026-11-21 从每 1 ms 改的，见根目录 notes 最后一节；底盘这头的代码没变），高字节在前（和大疆电机帧一样）。走两块板之间那路 CAN：底盘板默认 CAN1（电机在 CAN2）。
 
 ```c
 /* chassis_link.h：上面的 ChassisMode_e、ChassisCmd_t 也定义在这里；下面三个是底盘板调的 */

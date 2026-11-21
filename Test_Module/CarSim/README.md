@@ -35,8 +35,8 @@ test_car.c（场景：改 gimbal_test、断线、掉线，检查结果）
    │ 每 1 ms：
    ├─ 电机反馈帧（GM6020 ×2、M3508 ×4，按真实帧格式）→ 两块板的 DJI 驱动
    ├─ 底盘板一周期：ChassisLink_GetCmd → Chassis_SetCmd → Chassis_Update → SendAll   （同 Chassis_test/App/robot.c）
-   ├─ 云台板一周期：IMU → GimbalTestCmd_Update → Gimbal_Update → SendAll → ChassisLink_SendCmd（同 Gimbal_test/App/robot.c）
-   │        └─ 0x110 交给底盘板的 ChassisLink_ProcessRxFrame，下一周期底盘板才用上（两块板差 1 ms）
+   ├─ 云台板一周期：IMU → GimbalTestCmd_Update → Gimbal_Update → SendAll → 每 10 ms 一次 ChassisLink_SendCmd（同 Gimbal_test/App/robot.c）
+   │        └─ 0x110 交给底盘板的 ChassisLink_ProcessRxFrame，下一周期底盘板才用上，之后 10 个周期用的都是这一帧
    └─ 模型走 1 ms：0x200 帧的电流推底盘，0x1FE 帧的电流推云台；底盘转，云台 yaw 的底座跟着转
 ```
 

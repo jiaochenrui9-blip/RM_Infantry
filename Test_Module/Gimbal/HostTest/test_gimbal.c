@@ -527,6 +527,10 @@ static void Test_EncoderWrap180Unlimited(void)
     CHECK(travel_min > -1.0f, "转动方向反了（先往回走了）");
 }
 
+/* 0x110 每 CHASSIS_LINK_PERIOD_MS 才发一帧，改完要多等一个发送周期：云台被锁住要下一个周期才反映到发出的指令上，
+   只等 10 ms 时，锁住的那个周期正好轮到发帧的话，下一帧就落在等待之外 */
+#define LINK_WAIT_MS    (CHASSIS_LINK_PERIOD_MS + 10U)
+
 /* 板间指令（0x110）：云台板打包发出，用底盘板的接收代码解出来，和 gimbal_test 里给的一致；
    跟随 / 小陀螺只在云台实际处于 IMU 模式时才发出去，否则降成不跟随（gimbal_test_cmd.c） */
 static void Test_ChassisCmdLink(void)
@@ -555,24 +559,24 @@ static void Test_ChassisCmdLink(void)
 
     /* 进 IMU 模式后跟随、小陀螺原样发出 */
     SetMode(GIMBAL_MODE_IMU);
-    Sim_Run(10U);
+    Sim_Run(LINK_WAIT_MS);
     Sim_ChassisCmd(&rx);
     CHECK(rx.mode == CHASSIS_MODE_FOLLOW, "云台在 IMU 模式时应发跟随，实际 %d", (int)rx.mode);
     gimbal_test.chassis_mode = CHASSIS_MODE_SPIN;
-    Sim_Run(10U);
+    Sim_Run(LINK_WAIT_MS);
     Sim_ChassisCmd(&rx);
     CHECK(rx.mode == CHASSIS_MODE_SPIN, "云台在 IMU 模式时应发小陀螺，实际 %d", (int)rx.mode);
 
     /* IMU 失效 → 云台锁在 RELAX：指令还是 IMU，但发出去的应降成不跟随 */
     sim.imu_valid = 0U;
-    Sim_Run(10U);
+    Sim_Run(LINK_WAIT_MS);
     Sim_ChassisCmd(&rx);
     CHECK(Sim_Mode() == GIMBAL_MODE_RELAX, "IMU 失效后云台应锁在 RELAX");
     CHECK(rx.mode == CHASSIS_MODE_NO_FOLLOW, "云台被锁在 RELAX 时小陀螺应降成不跟随，实际 %d", (int)rx.mode);
 
     /* 底盘给 RELAX：原样发出 */
     gimbal_test.chassis_mode = CHASSIS_MODE_RELAX;
-    Sim_Run(10U);
+    Sim_Run(LINK_WAIT_MS);
     Sim_ChassisCmd(&rx);
     CHECK(rx.mode == CHASSIS_MODE_RELAX, "底盘指令 RELAX 应原样发出，实际 %d", (int)rx.mode);
     INFO("降级：编码器 / 云台锁定时跟随、小陀螺 → 不跟随；IMU 模式原样发");

@@ -44,6 +44,7 @@ extern CAN_HandleTypeDef car_chassis_hcan2;
 Car_t car;
 
 static uint32_t car_tick;
+static uint32_t car_link_tick;                 /* 云台板上次发 0x110 时的 tick */
 static DJI_MotorManager_t car_gimbal_can1;     /* 和两块板的 robot.c 一样：每路 CAN 一个 manager */
 static DJI_MotorManager_t car_gimbal_can2;
 static DJI_MotorManager_t car_chassis_can1;
@@ -298,7 +299,7 @@ static void Car_Step(void)
     /* 1. 两块板的 CAN 中断：电机反馈帧 */
     Car_SendFeedback();
 
-    /* 2. 底盘板 Robot_Loop：用的是上一周期云台板发来的 0x110（两块板各跑各的，差 1 ms 左右） */
+    /* 2. 底盘板 Robot_Loop：用的是云台板最近发来的那帧 0x110。每 CHASSIS_LINK_PERIOD_MS 一帧，所以是 1~10 ms 前发的 */
     ChassisLink_GetCmd(car_tick, &car_chassis_rx);
     Chassis_SetCmd(&car_chassis_rx);
     Chassis_Update(car_tick);
@@ -314,9 +315,14 @@ static void Car_Step(void)
     Gimbal_Update(car_tick);
     (void)DJI_MotorManager_SendAll(&car_gimbal_can1);
     (void)DJI_MotorManager_SendAll(&car_gimbal_can2);
-    if (car.link_on != 0U)
+    /* 断线时云台板照样到点发，只是底盘板收不到：接回后下一帧还在原来的节拍上 */
+    if ((car_tick - car_link_tick) >= CHASSIS_LINK_PERIOD_MS)
     {
-        (void)ChassisLink_SendCmd(&car_gimbal_hcan1, &chassis_cmd);
+        car_link_tick = car_tick;
+        if (car.link_on != 0U)
+        {
+            (void)ChassisLink_SendCmd(&car_gimbal_hcan1, &chassis_cmd);
+        }
     }
 
     /* 4. 模型按收到的电流往前走 1 ms */
